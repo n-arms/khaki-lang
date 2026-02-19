@@ -1,0 +1,297 @@
+use std::collections::HashMap;
+use std::ops::Range;
+
+use chumsky::{
+    IterParser, ParseResult, Parser,
+    error::Rich,
+    extra::{Full, ParserExtra},
+    input::{Input, MapExtra},
+    prelude::{just, recursive},
+    span::SimpleSpan,
+};
+
+use logos::Logos;
+
+use crate::{
+    ast::{Expr, Func, Literal, Op, Span, Stmt, Struct, Type, TypeKind},
+    parser::token::TokenKind,
+};
+
+pub mod token;
+
+#[derive(Debug)]
+pub struct BadToken(pub Range<usize>);
+
+pub fn scan_program(text: &str) -> Result<Vec<(TokenKind, SimpleSpan)>, BadToken> {
+    let token_iter = TokenKind::lexer(text);
+    let mut tokens = Vec::new();
+    for (token_kind, span) in token_iter.spanned() {
+        tokens.push((
+            token_kind.map_err(|_| BadToken(span.clone()))?,
+            SimpleSpan::from(span),
+        ));
+    }
+    Ok(tokens)
+}
+
+pub fn parse_program<'a>(
+    text: &'a str,
+    tokens: &'a [(TokenKind, SimpleSpan)],
+) -> ParseResult<Vec<Struct>, Rich<'a, TokenKind>> {
+    let eoi = SimpleSpan::from(text.len()..text.len());
+    let input = tokens.split_token_span(eoi);
+
+    let parser = program(text);
+    parser.parse(input)
+}
+
+type Ctx<'a> = Full<Rich<'a, TokenKind>, (), ()>;
+
+fn list<'a, I: Input<'a, Token = TokenKind, Span = SimpleSpan>, T: Clone>(
+    elem: impl Parser<'a, I, T, Ctx<'a>> + Clone,
+) -> impl Parser<'a, I, Vec<T>, Ctx<'a>> + Clone {
+    elem.clone()
+        .then(
+            just(TokenKind::Comma)
+                .ignore_then(elem)
+                .repeated()
+                .collect::<Vec<_>>(),
+        )
+        .map(|(first, mut rest)| {
+            rest.insert(0, first);
+            rest
+        })
+        .or_not()
+        .map(|list| list.unwrap_or_default())
+}
+
+fn get_span<'src, 'b, I: Input<'src, Span = SimpleSpan>, E: ParserExtra<'src, I>>(
+    extra: &mut MapExtra<'src, 'b, I, E>,
+) -> Span {
+    let span: SimpleSpan = extra.span();
+    span.into()
+}
+
+fn program<'a, I: Input<'a, Token = TokenKind, Span = SimpleSpan>>(
+    input: &'a str,
+) -> impl Parser<'a, I, Vec<Struct>, Ctx<'a>> {
+    strukt(input).repeated().collect()
+}
+
+fn strukt<'a, I: Input<'a, Token = TokenKind, Span = SimpleSpan>>(
+    input: &'a str,
+) -> impl Parser<'a, I, Struct, Ctx<'a>> {
+    let typ = recursive(|typ| {
+        let named = upper_name(input)
+            .then(
+                list(typ.clone())
+                    .delimited_by(just(TokenKind::LeftSquare), just(TokenKind::RightSquare))
+                    .or_not()
+                    .map(|list| list.unwrap_or_default()),
+            )
+            .map_with(|(name, children), e| Type {
+                kind: TypeKind::Named(name),
+                span: get_span(e),
+                children,
+            });
+        let generic =
+            name(input).map_with(|name, e| Type::base(TypeKind::Generic(name), get_span(e)));
+        generic.or(named)
+    });
+
+    let expr = recursive(|expr| {
+        let number = num(input).map_with(|num, e| Literal::Number(num, get_span(e)));
+        let _true = just(TokenKind::True).map_with(|_, e| Literal::Bool(true, get_span(e)));
+        let _false = just(TokenKind::False).map_with(|_, e| Literal::Bool(false, get_span(e)));
+        let literal = number
+            .or(_true)
+            .or(_false)
+            .map(|lit| Expr::Literal(lit, None));
+        let var = name(input).map_with(|name, e| Expr::Var(name, None, get_span(e)));
+
+        let func = upper_name(input)
+            .then(
+                list(typ.clone())
+                    .delimited_by(just(TokenKind::LeftSquare), just(TokenKind::RightSquare))
+                    .or_not()
+                    .map(|list| list.unwrap_or_default()),
+            )
+            .then_ignore(just(TokenKind::Dot))
+            .then(name(input))
+            .map_with(|((struct_name, generics), func_name), e| {
+                Expr::Func(struct_name, func_name, None, get_span(e))
+            });
+        let stmt = just(TokenKind::Let)
+            .ignore_then(name(input))
+            .then_ignore(just(TokenKind::Equals))
+            .then(expr.clone())
+            .then_ignore(just(TokenKind::Semicolon))
+            .map(|(var, val)| Stmt::Let(var, val));
+        let block = just(TokenKind::LeftBrace)
+            .ignore_then(stmt.repeated().collect::<Vec<_>>())
+            .then(expr.clone())
+            .then_ignore(just(TokenKind::RightBrace))
+            .map(|(stmts, result)| Expr::Block(stmts, Box::new(result)));
+        let _yield =
+            just(TokenKind::Yield).map_with(|_, e| Expr::Op(Op::Yield, vec![], None, get_span(e)));
+        let base = literal.or(var).or(func).or(block).or(_yield);
+
+        enum Modif {
+            Call(Vec<Expr>, Span),
+            Await(Span),
+        }
+
+        let call_modif = list(expr.clone())
+            .delimited_by(just(TokenKind::LeftParen), just(TokenKind::RightParen))
+            .map_with(|args, e| Modif::Call(args, get_span(e)));
+        let await_modif = just(TokenKind::Bang).map_with(|_, e| Modif::Await(get_span(e)));
+        let modif = call_modif.or(await_modif);
+
+        base.then(modif.repeated().collect::<Vec<_>>())
+            .map_with(|(mut expr, modifs), e| {
+                for modif in modifs {
+                    expr = match modif {
+                        Modif::Call(args, span) => Expr::Call(Box::new(expr), args, None, span),
+                        Modif::Await(span) => Expr::Op(Op::Await, vec![expr], None, span),
+                    };
+                }
+                expr
+            })
+    });
+
+    let field = name(input)
+        .then_ignore(just(TokenKind::Colon))
+        .then(typ.clone());
+    let arg = name(input)
+        .then_ignore(just(TokenKind::Colon))
+        .then(typ.clone());
+    let func = just(TokenKind::Func)
+        .to(false)
+        .or(just(TokenKind::Cor).to(true))
+        .then(name(input))
+        .then(list(arg).delimited_by(just(TokenKind::LeftParen), just(TokenKind::RightParen)))
+        .then_ignore(just(TokenKind::Colon))
+        .then(typ.clone())
+        .then_ignore(just(TokenKind::Equals))
+        .then(expr)
+        .map(|((((is_cor, name), args), result), body)| Func {
+            name,
+            args,
+            result,
+            body,
+            is_cor,
+        });
+    just(TokenKind::Struct)
+        .ignore_then(upper_name(input))
+        .then(
+            list(name(input))
+                .delimited_by(just(TokenKind::LeftSquare), just(TokenKind::RightSquare))
+                .or_not(),
+        )
+        .then_ignore(just(TokenKind::LeftBrace))
+        .then(field.repeated().collect::<HashMap<_, _>>())
+        .then(func.repeated().collect::<Vec<_>>())
+        .then_ignore(just(TokenKind::RightBrace))
+        .map(|(((name, generics), fields), funcs)| Struct {
+            name,
+            generics: generics.unwrap_or_default(),
+            fields,
+            funcs: funcs
+                .into_iter()
+                .map(|func| (func.name.clone(), func))
+                .collect(),
+        })
+}
+
+fn name<'a, I: Input<'a, Token = TokenKind, Span = SimpleSpan>>(
+    input: &'a str,
+) -> impl Parser<'a, I, String, Ctx<'a>> + Clone {
+    just(TokenKind::Name).map_with(|_, e| {
+        let span: SimpleSpan = e.span();
+        input[span.into_range()].to_string()
+    })
+}
+
+fn upper_name<'a, I: Input<'a, Token = TokenKind, Span = SimpleSpan>>(
+    input: &'a str,
+) -> impl Parser<'a, I, String, Ctx<'a>> + Clone {
+    just(TokenKind::UpperName).map_with(|_, e| {
+        let span: SimpleSpan = e.span();
+        input[span.into_range()].to_string()
+    })
+}
+
+fn num<'a, I: Input<'a, Token = TokenKind, Span = SimpleSpan>>(
+    input: &'a str,
+) -> impl Parser<'a, I, String, Ctx<'a>> + Clone {
+    just(TokenKind::Number).map_with(|_, e| {
+        let span: SimpleSpan = e.span();
+        input[span.into_range()].to_string()
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_parse(text: &str) {
+        let tokens = scan_program(text).unwrap();
+        let _ = parse_program(text, &tokens).unwrap();
+    }
+
+    #[test]
+    fn empty_generic_struct() {
+        let source = r#"
+            struct Cat[t] {
+            
+            }
+        "#;
+        test_parse(source);
+    }
+
+    #[test]
+    fn struct_with_field() {
+        let source = r#"
+            struct Cat[t] {
+                inner: t
+            }
+        "#;
+        test_parse(source);
+    }
+
+    #[test]
+    fn weird_types() {
+        let source = r#"
+            struct Zoo[x, y] {
+                zookeeper: x
+                lion: Ptr[Cat[y]]
+                escaped_animals: Int
+            }
+        "#;
+        test_parse(source);
+    }
+
+    #[test]
+    fn struct_with_func() {
+        let source = r#"
+            struct Main {
+                func main(): Int = 3
+            }
+        "#;
+        test_parse(source);
+    }
+
+    #[test]
+    fn feed_cats() {
+        let source = r#"
+            struct Cat[t] {
+                inner: t
+            }
+
+            struct Main[t] {
+                func main(c: Cat[t]): Unit = Cat[t].feed(c, 3)
+            }
+        "#;
+        test_parse(source);
+    }
+}
