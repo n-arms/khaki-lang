@@ -3,6 +3,8 @@ use std::{collections::HashMap, ops::Range};
 
 use chumsky::span::SimpleSpan;
 
+use crate::ord_map::OrdMap;
+
 #[derive(Copy, Clone)]
 pub struct Span {
     pub start: usize,
@@ -13,7 +15,7 @@ pub struct Span {
 pub struct Struct {
     pub name: String,
     pub generics: Vec<String>,
-    pub fields: HashMap<String, Type>,
+    pub fields: OrdMap<String, Type>,
     pub funcs: HashMap<String, Func>,
 }
 

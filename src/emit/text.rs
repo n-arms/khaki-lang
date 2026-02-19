@@ -39,3 +39,16 @@ impl Text {
         self.text
     }
 }
+
+#[derive(Default)]
+pub struct LlvmVals {
+    next: usize,
+}
+
+impl LlvmVals {
+    pub fn fresh(&mut self) -> String {
+        let id = self.next;
+        self.next += 1;
+        format!("%var{id}")
+    }
+}

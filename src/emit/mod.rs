@@ -2,43 +2,14 @@ use std::collections::{HashMap, HashSet};
 
 use crate::{
     ast::{Literal, Type, TypeKind},
-    emit::text::Text,
+    derive::CorParts,
+    emit::text::{LlvmVals, Text},
     ir::{BlockId, End, Func, Instr, Op, Slot, Struct, Value},
     typing::Spec,
 };
 
+mod cor;
 mod text;
-
-#[derive(Default)]
-struct LlvmVals {
-    next: usize,
-}
-
-impl LlvmVals {
-    fn fresh(&mut self) -> String {
-        let id = self.next;
-        self.next += 1;
-        format!("%var{id}")
-    }
-}
-
-// calculate all the slots that need to be saved / restored over await points
-// we don't do fine-grained tracking of which slot needs to be saved over which gap
-fn saved_slots(func: &Func) -> HashSet<Slot> {
-    let mut saved = HashSet::new();
-    for block in func.blocks.values() {
-        let mut defined: HashSet<Slot> = HashSet::new();
-        for instr in &block.instrs {
-            for arg in &instr.args {
-                if !defined.contains(arg) {
-                    saved.insert(arg.clone());
-                }
-            }
-            defined.insert(instr.result.clone());
-        }
-    }
-    saved
-}
 
 fn str_list<I: AsRef<str>>(elems: impl IntoIterator<Item = I>) -> String {
     let mut text = String::new();
@@ -103,11 +74,11 @@ fn struct_name(struct_spec: &Spec) -> String {
     )
 }
 
-fn resolve_struct(struct_spec: &Spec) -> String {
+pub fn resolve_struct(struct_spec: &Spec) -> String {
     format!("%\"{}\"", struct_name(struct_spec))
 }
 
-fn resolve_func(struct_spec: &Spec, func_name: &str) -> String {
+pub fn resolve_func(struct_spec: &Spec, func_name: &str) -> String {
     format!("@\"{}.{}\"", struct_name(struct_spec), func_name)
 }
 
@@ -115,19 +86,39 @@ fn slot_name(slot: &Slot) -> String {
     format!("%{}", slot.0)
 }
 
-pub fn emit_program(program: &HashMap<Spec, Struct>) -> String {
+pub fn emit_program(
+    program: &HashMap<Spec, Struct>,
+    cor_structs: &HashMap<String, CorParts>,
+) -> String {
     let mut text = Text::default();
 
     for (spec, strukt) in program {
         if ["Int", "Bool"].contains(&spec.struct_name.as_str()) {
             continue;
         }
-        emit_struct_type_def(spec, strukt, &mut text);
+        if let Some(cor_parts) = cor_structs.get(&spec.struct_name) {
+            let cor_spec = Spec {
+                struct_name: cor_parts.struct_name.clone(),
+                generics: spec.generics.clone(),
+            };
+            let func = &program[&cor_spec].funcs[&cor_parts.func_name];
+            cor::emit_cor_struct(&cor_spec, func, &mut text);
+        } else {
+            emit_struct_type_def(spec, strukt, &mut text);
+        }
     }
 
     for (spec, strukt) in program {
+        if cor_structs.contains_key(&spec.struct_name) {
+            continue;
+        }
         for func in strukt.funcs.values() {
-            emit_func(spec, func, &mut text);
+            if func.is_cor {
+                cor::emit_constructor(spec, func, &mut text);
+                cor::emit_poll(spec, func, &mut text);
+            } else {
+                emit_func(spec, func, &mut text);
+            }
         }
     }
 
@@ -150,6 +141,7 @@ fn emit_func(struct_spec: &Spec, func: &Func, text: &mut Text) {
     text.pushln("entry:");
     text.inc();
     emit_slot_setup(func, text);
+    emit_arg_loads(func, text);
     text.pushln(format!("br label %{}", block_name(func.main)));
     text.dec();
 
@@ -208,7 +200,7 @@ fn emit_func_prefix(struct_spec: &Spec, func: &Func, text: &mut Text) {
 }
 
 // emit top-level alloca's for each slot, and store the function arguments into the appropriate slots
-fn emit_slot_setup(func: &Func, text: &mut Text) {
+pub fn emit_slot_setup(func: &Func, text: &mut Text) {
     let mut slots: HashSet<_> = func
         .blocks
         .values()
@@ -229,7 +221,9 @@ fn emit_slot_setup(func: &Func, text: &mut Text) {
             emit_type(&slot.1)
         ));
     }
+}
 
+fn emit_arg_loads(func: &Func, text: &mut Text) {
     for arg in &func.args {
         store_slot(arg, arg_name(arg), text);
     }

@@ -44,7 +44,11 @@ fn lower_struct(strukt: &ast::Struct, generics: Vec<Type>) -> ir::Struct {
 
     ir::Struct {
         name: spec,
-        fields: strukt.fields.clone(),
+        fields: strukt
+            .fields
+            .iter()
+            .map(|(name, typ)| (name.clone(), typ.clone()))
+            .collect(),
         funcs,
     }
 }
@@ -60,7 +64,7 @@ fn lower_func(func: &ast::Func) -> ir::Func {
     }
     let result_slot = lower_expr(&func.body, &mut fb, &env);
     fb.end_block(ir::End::Return(result_slot, func.result.span));
-    fb.finish(func.name.clone(), args, func.result.clone())
+    fb.finish(func.name.clone(), func.is_cor, args, func.result.clone())
 }
 
 fn lower_expr(expr: &ast::Expr, fb: &mut FuncBuilder, env: &Env) -> ir::Slot {

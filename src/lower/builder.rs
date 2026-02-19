@@ -81,12 +81,13 @@ impl FuncBuilder {
         slot
     }
 
-    pub fn finish(mut self, name: String, args: Vec<Slot>, result: Type) -> Func {
+    pub fn finish(mut self, name: String, is_cor: bool, args: Vec<Slot>, result: Type) -> Func {
         if let Some(current) = self.current.take() {
             panic!("Premature end to unfinished block {current:?}");
         };
         Func {
             name,
+            is_cor,
             args,
             result,
             main: BlockId(0),

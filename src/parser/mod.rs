@@ -14,6 +14,7 @@ use logos::Logos;
 
 use crate::{
     ast::{Expr, Func, Literal, Op, Span, Stmt, Struct, Type, TypeKind},
+    ord_map::OrdMap,
     parser::token::TokenKind,
 };
 
@@ -195,7 +196,7 @@ fn strukt<'a, I: Input<'a, Token = TokenKind, Span = SimpleSpan>>(
         .map(|(((name, generics), fields), funcs)| Struct {
             name,
             generics: generics.unwrap_or_default(),
-            fields,
+            fields: fields.into_iter().collect(),
             funcs: funcs
                 .into_iter()
                 .map(|func| (func.name.clone(), func))

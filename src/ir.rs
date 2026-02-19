@@ -2,19 +2,21 @@ use std::collections::HashMap;
 
 use crate::{
     ast::{Literal, Span, Type},
+    ord_map::OrdMap,
     typing::Spec,
 };
 
 #[derive(Clone, Debug)]
 pub struct Struct {
     pub name: Spec,
-    pub fields: HashMap<String, Type>,
+    pub fields: OrdMap<String, Type>,
     pub funcs: HashMap<String, Func>,
 }
 
 #[derive(Clone, Debug)]
 pub struct Func {
     pub name: String,
+    pub is_cor: bool,
     pub args: Vec<Slot>,
     pub result: Type,
     pub main: BlockId,

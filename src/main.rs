@@ -2,9 +2,10 @@ use std::{collections::HashMap, fs};
 
 use crate::{
     ast::{Expr, Func, Op, Span, Struct, Type},
-    derive::derive,
+    derive::derive_cor_structs,
     emit::emit_program,
     lower::lower_program,
+    ord_map::OrdMap,
     parser::{parse_program, scan_program},
     typing::type_program,
 };
@@ -15,6 +16,7 @@ mod emit;
 mod eval;
 mod ir;
 mod lower;
+mod ord_map;
 mod parser;
 mod typing;
 
@@ -36,11 +38,19 @@ fn main() {
 
     let source = r#"
         struct Main {
-            func double(x: Int): Int = {
-                Int.add(x, x)
+            cor f(x: Int): Int = {
+                let _ = yield;
+                x
             }
         }
     "#;
+    // let source = r#"
+    //     struct Main {
+    //         func double(x: Int): Int = {
+    //             Int.add(x, x)
+    //         }
+    //     }
+    // "#;
 
     let tokens = scan_program(source).unwrap();
     let mut ast = parse_program(source, &tokens).unwrap();
@@ -50,7 +60,7 @@ fn main() {
     ast.push(Struct {
         name: "Int".into(),
         generics: Vec::new(),
-        fields: HashMap::new(),
+        fields: OrdMap::new(),
         funcs: HashMap::from([((
             String::from("add"),
             Func {
@@ -76,20 +86,20 @@ fn main() {
     ast.push(Struct {
         name: "Unit".into(),
         generics: Vec::new(),
-        fields: HashMap::new(),
+        fields: OrdMap::new(),
         funcs: HashMap::new(),
     });
     ast.push(Struct {
         name: "Bool".into(),
         generics: Vec::new(),
-        fields: HashMap::new(),
+        fields: OrdMap::new(),
         funcs: HashMap::new(),
     });
     let ptr = Type::named("Ptr".into(), vec![Type::generic("t", span)], span);
     ast.push(Struct {
         name: "Ptr".into(),
         generics: vec!["t".into()],
-        fields: HashMap::new(),
+        fields: OrdMap::new(),
         funcs: HashMap::from([
             (
                 String::from("get"),
@@ -130,13 +140,13 @@ fn main() {
         ]),
     });
 
-    derive(&mut ast);
+    let cor_structs = derive_cor_structs(&mut ast);
     dbg!(&ast);
     let typed = type_program(&ast).unwrap();
     dbg!(&typed);
     let lowered = lower_program(&typed);
     dbg!(&lowered);
-    let llvm = emit_program(&lowered);
+    let llvm = emit_program(&lowered, &cor_structs);
     fs::write("out.ll", llvm).unwrap();
 
     // let prog = Prog {
