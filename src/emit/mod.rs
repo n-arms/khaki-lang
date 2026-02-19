@@ -122,6 +122,8 @@ pub fn emit_program(
         }
     }
 
+    text.pushln("attributes #0 = { noinline }");
+
     text.finish()
 }
 
@@ -190,7 +192,7 @@ fn emit_func_prefix(struct_spec: &Spec, func: &Func, text: &mut Text) {
     let func_name = resolve_func(struct_spec, &func.name);
     let result_type = emit_type(&func.result);
     text.push(format!(
-        "define {result_type} {func_name}({})",
+        "define {result_type} {func_name}({}) #0",
         str_list(
             func.args
                 .iter()
@@ -205,11 +207,13 @@ pub fn emit_slot_setup(func: &Func, text: &mut Text) {
         .blocks
         .values()
         .flat_map(|block| {
-            block
+            let mut block_slots = block
                 .instrs
                 .iter()
                 .map(|instr| &instr.result)
-                .collect::<Vec<_>>()
+                .collect::<Vec<_>>();
+            block_slots.extend(block.end.result_slots());
+            block_slots
         })
         .collect();
     slots.extend(&func.args);

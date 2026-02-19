@@ -105,7 +105,10 @@ fn lower_expr(expr: &ast::Expr, fb: &mut FuncBuilder, env: &Env) -> ir::Slot {
                 ),
                 ast::Op::Await => {
                     let result = fb.slot(result);
+                    let await_branch = fb.create_block();
                     let then_branch = fb.create_block();
+                    fb.end_block(ir::End::Jump(await_branch, *span));
+                    fb.start_block(await_branch);
                     fb.end_block(ir::End::Await {
                         cor_struct: arg_vals[0].clone(),
                         result: result.clone(),

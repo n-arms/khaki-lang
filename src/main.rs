@@ -42,6 +42,11 @@ fn main() {
                 let _ = yield;
                 x
             }
+
+            cor g(a: Int): Int = {
+                let w = Main.f(a)!;
+                w
+            }
         }
     "#;
     // let source = r#"

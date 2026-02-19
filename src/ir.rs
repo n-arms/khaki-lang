@@ -75,3 +75,12 @@ pub enum End {
     Yield(BlockId, Span),
     Return(Slot, Span),
 }
+
+impl End {
+    pub fn result_slots(&self) -> impl IntoIterator<Item = &Slot> {
+        match self {
+            End::Jump(..) | End::JumpIf { .. } | End::Yield(..) | End::Return(..) => None,
+            End::Await { result, .. } => Some(result),
+        }
+    }
+}

@@ -6,10 +6,10 @@ as well as the original cor function (called the constructor), which just builds
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    ast::{Type, cor_name},
+    ast::{Type, TypeKind, cor_name},
     emit::{
-        block_name, emit_instr, emit_slot_setup, emit_type, load_slot, resolve_func, store_slot,
-        str_list,
+        block_name, emit_instr, emit_slot_setup, emit_type, load_slot, resolve_func, slot_name,
+        store_slot, str_list,
         text::{LlvmVals, Text},
     },
     ir::{BlockId, End, Func, Slot},
@@ -43,13 +43,13 @@ fn saved_slots(func: &Func) -> Vec<Slot> {
 fn build_block_state_maps(func: &Func) -> HashMap<BlockId, usize> {
     let mut state_map: HashMap<_, _> = func
         .blocks
-        .values()
-        .filter_map(|block| match &block.end {
+        .iter()
+        .filter_map(|(current_id, block)| match &block.end {
             End::Return(..) | End::Jump(..) | End::JumpIf { .. } => None,
-            End::Yield(id, _)
-            | End::Await {
-                then_branch: id, ..
-            } => Some(*id),
+            // yields resume at the next block
+            End::Yield(next_id, _) => Some(*next_id),
+            // awaits resume at the current block
+            End::Await { .. } => Some(*current_id),
         })
         .enumerate()
         .map(|(state, id)| (id, state + 1))
@@ -121,7 +121,7 @@ pub fn emit_poll(struct_spec: &Spec, func: &Func, text: &mut Text) {
     let cor_struct = cor_struct_name(struct_spec, func);
     let result_type = emit_type(&func.result);
     text.pushln(format!(
-        "define i8 {poll_name}({cor_struct}* %cor, {result_type}* %result) {{"
+        "define i8 {poll_name}({cor_struct}* %cor, {result_type}* %result) #0 {{"
     ));
     text.pushln("entry:");
     text.inc();
@@ -221,7 +221,7 @@ fn emit_cor_end(
         } => {
             let cond = load_slot(slot, text, vals);
             let temp = vals.fresh();
-            text.pushln(format!("{temp} = icmp sgt i8 {cond}, 0"));
+            text.pushln(format!("{temp} = icmp ne i8 {cond}, 0"));
 
             let then_label = block_name(*then_branch);
             let else_label = block_name(*else_branch);
@@ -235,7 +235,36 @@ fn emit_cor_end(
             result,
             then_branch,
             span,
-        } => todo!(),
+        } => {
+            let TypeKind::Named(cor_name) = &cor_struct.1.kind else {
+                unreachable!()
+            };
+            let cor_spec = Spec {
+                struct_name: cor_name.clone(),
+                generics: cor_struct.1.children.clone(),
+            };
+            let poll_name = resolve_func(&cor_spec, "poll");
+            let poll_result = vals.fresh();
+            text.pushln(format!(
+                "{poll_result} = call i8 {poll_name}({}* {}, {}* {})",
+                emit_type(&cor_struct.1),
+                slot_name(cor_struct),
+                emit_type(&result.1),
+                slot_name(result),
+            ));
+            let temp = vals.fresh();
+            text.pushln(format!("{temp} = icmp ne i8 {poll_result}, 0"));
+            let then_label = block_name(*then_branch);
+            let yield_label = format!("await_{}", then_branch.0);
+            text.pushln(format!(
+                "br i1 {temp}, label %{then_label}, label %{yield_label}"
+            ));
+            text.dec();
+            text.pushln(format!("{yield_label}:"));
+            text.inc();
+            save_saved_slots(field_ptrs, text, vals);
+            text.pushln("ret i8 0");
+        }
         End::Yield(block_id, span) => {
             let state = id_to_state[block_id];
             text.pushln(format!("store i32 {state}, i32* {state_ptr}"));
