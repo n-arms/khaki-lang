@@ -21,41 +21,15 @@ mod parser;
 mod typing;
 
 fn main() {
-    // let source = r#"
-    //     struct Main {
-    //         cor foo(): Int = {
-    //             let x = 5;
-    //             let _ = yield;
-    //             x
-    //         }
-    //         cor bar(): Int = {
-    //             let a = Main.foo()!;
-    //             let _ = yield;
-    //             a
-    //         }
-    //     }
-    // "#;
-
     let source = r#"
         struct Main {
-            cor f(x: Int): Int = {
-                let _ = yield;
-                x
-            }
-
-            cor g(a: Int): Int = {
-                let w = Main.f(a)!;
-                w
+            func inc(counter: Ptr[Int]): Unit = {
+                let val = Ptr.get(counter);
+                let unit = Ptr.set(counter, Int.add(val, 1));
+                unit
             }
         }
     "#;
-    // let source = r#"
-    //     struct Main {
-    //         func double(x: Int): Int = {
-    //             Int.add(x, x)
-    //         }
-    //     }
-    // "#;
 
     let tokens = scan_program(source).unwrap();
     let mut ast = parse_program(source, &tokens).unwrap();

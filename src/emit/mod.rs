@@ -26,6 +26,8 @@ fn emit_type(typ: &Type) -> String {
     if let TypeKind::Named(name) = &typ.kind {
         if let Some(prim) = primitive_name(name) {
             prim
+        } else if name == "Ptr" {
+            emit_type(&typ.children[0]) + "*"
         } else {
             format!("%\"{}\"", type_name(typ))
         }
@@ -58,6 +60,8 @@ fn type_name(typ: &Type) -> String {
         TypeKind::Named(name) => {
             if let Some(name) = primitive_name(name) {
                 name
+            } else if name == "Ptr" {
+                emit_type(&typ.children[0]) + "*"
             } else {
                 format!("{name}[{}]", str_list(typ.children.iter().map(type_name)))
             }
@@ -306,6 +310,19 @@ fn emit_instr(instr: &Instr, text: &mut Text, vals: &mut LlvmVals) {
                     let b = load_slot(&instr.args[1], text, vals);
                     let temp = vals.fresh();
                     text.pushln(format!("{temp} = add {result_type} {a}, {b}"));
+                    store_result(temp, text);
+                }
+                "ptr_set" => {
+                    let ptr = load_slot(&instr.args[0], text, vals);
+                    let val = load_slot(&instr.args[1], text, vals);
+                    let val_type = emit_type(&instr.args[1].1);
+                    text.pushln(format!("store {val_type} {val}, {val_type}* {ptr}"));
+                    store_result("{}".into(), text);
+                }
+                "ptr_get" => {
+                    let ptr = load_slot(&instr.args[0], text, vals);
+                    let temp = vals.fresh();
+                    text.pushln(format!("{temp} = load {result_type}, {result_type}* {ptr}"));
                     store_result(temp, text);
                 }
                 _ => unreachable!("Builtin {name}"),
