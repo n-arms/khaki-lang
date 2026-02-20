@@ -126,7 +126,7 @@ pub fn emit_program(
         }
     }
 
-    text.pushln("attributes #0 = { noinline }");
+    text.pushln("attributes #0 = { \"no-sse\" }");
 
     text.finish()
 }
@@ -346,6 +346,9 @@ fn emit_instr(instr: &Instr, text: &mut Text, vals: &mut LlvmVals) {
                 str_list(args.iter().skip(1).map(|(typ, val)| format!("{typ} {val}")))
             ));
             store_result(temp, text);
+        }
+        Value::Ref => {
+            store_result(slot_name(&instr.args[0]), text);
         }
     }
 }

@@ -50,6 +50,7 @@ pub enum Value {
     Literal(Literal),
     Op(Op),
     Call,
+    Ref,
 }
 
 #[derive(Clone, Debug)]

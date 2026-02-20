@@ -14,7 +14,6 @@ use logos::Logos;
 
 use crate::{
     ast::{Expr, Func, Literal, Op, Span, Stmt, Struct, Type, TypeKind},
-    ord_map::OrdMap,
     parser::token::TokenKind,
 };
 
@@ -122,20 +121,48 @@ fn strukt<'a, I: Input<'a, Token = TokenKind, Span = SimpleSpan>>(
             .map_with(|((struct_name, generics), func_name), e| {
                 Expr::Func(struct_name, func_name, None, get_span(e))
             });
-        let stmt = just(TokenKind::Let)
-            .ignore_then(name(input))
+        let let_set_stmt = just(TokenKind::Let)
+            .or(just(TokenKind::Set))
+            .then(name(input))
             .then_ignore(just(TokenKind::Equals))
             .then(expr.clone())
-            .then_ignore(just(TokenKind::Semicolon))
-            .map(|(var, val)| Stmt::Let(var, val));
+            .map(|((let_set, var), val)| {
+                if let_set == TokenKind::Let {
+                    Stmt::Let(var, val)
+                } else {
+                    Stmt::Set(var, val)
+                }
+            });
+        let expr_stmt = expr.clone().map(Stmt::Expr);
+        let stmt = let_set_stmt.or(expr_stmt);
         let block = just(TokenKind::LeftBrace)
-            .ignore_then(stmt.repeated().collect::<Vec<_>>())
-            .then(expr.clone())
+            .ignore_then(
+                stmt.clone()
+                    .then_ignore(just(TokenKind::Semicolon))
+                    .repeated()
+                    .collect::<Vec<_>>(),
+            )
+            .then(stmt.or_not())
             .then_ignore(just(TokenKind::RightBrace))
-            .map(|(stmts, result)| Expr::Block(stmts, Box::new(result)));
+            .map_with(|(mut stmts, last_stmt), e| {
+                let span = get_span(e);
+                if let Some(stmt) = last_stmt {
+                    if let Stmt::Expr(expr) = stmt {
+                        Expr::Block(stmts, Some(Box::new(expr)), span)
+                    } else {
+                        stmts.push(stmt);
+                        Expr::Block(stmts, None, span)
+                    }
+                } else {
+                    Expr::Block(stmts, None, span)
+                }
+            });
+        let _ref = just(TokenKind::Ampersand)
+            .then(expr.clone())
+            .map_with(|(_, expr), e| Expr::Op(Op::Ref, vec![expr], None, get_span(e)));
         let _yield =
             just(TokenKind::Yield).map_with(|_, e| Expr::Op(Op::Yield, vec![], None, get_span(e)));
-        let base = literal.or(var).or(func).or(block).or(_yield);
+        let base = literal.or(var).or(func).or(block).or(_yield).or(_ref);
 
         enum Modif {
             Call(Vec<Expr>, Span),

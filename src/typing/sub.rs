@@ -89,13 +89,15 @@ impl Sub {
                     self.typ(typ);
                 }
             }
-            Expr::Block(stmts, result) => {
+            Expr::Block(stmts, result, span) => {
                 for stmt in stmts {
                     match stmt {
-                        Stmt::Let(_, val) => self.expr(val),
+                        Stmt::Set(_, val) | Stmt::Expr(val) | Stmt::Let(_, val) => self.expr(val),
                     }
                 }
-                self.expr(result);
+                if let Some(result) = result {
+                    self.expr(result);
+                }
             }
         }
     }

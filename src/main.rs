@@ -13,7 +13,6 @@ use crate::{
 mod ast;
 mod derive;
 mod emit;
-mod eval;
 mod ir;
 mod lower;
 mod ord_map;
@@ -23,10 +22,15 @@ mod typing;
 fn main() {
     let source = r#"
         struct Main {
-            func inc(counter: Ptr[Int]): Unit = {
-                let val = Ptr.get(counter);
-                let unit = Ptr.set(counter, Int.add(val, 1));
-                unit
+            func inc(p: Ptr[Int]): Unit = {
+                let x = Ptr.load(p);
+                Ptr.store(p, Int.add(x, 1))
+            }
+
+            func foo(): Int = {
+                let q = 5;
+                Main.inc(&q);
+                q
             }
         }
     "#;
@@ -81,9 +85,9 @@ fn main() {
         fields: OrdMap::new(),
         funcs: HashMap::from([
             (
-                String::from("get"),
+                String::from("load"),
                 Func {
-                    name: "get".into(),
+                    name: "load".into(),
                     is_cor: false,
                     args: vec![("p".into(), ptr.clone())],
                     result: Type::generic("t", span),
@@ -96,9 +100,9 @@ fn main() {
                 },
             ),
             (
-                String::from("set"),
+                String::from("store"),
                 Func {
-                    name: "set".into(),
+                    name: "store".into(),
                     is_cor: false,
                     args: vec![
                         ("p".into(), ptr.clone()),

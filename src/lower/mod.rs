@@ -95,6 +95,17 @@ fn lower_expr(expr: &ast::Expr, fb: &mut FuncBuilder, env: &Env) -> ir::Slot {
             literal.span(),
         ),
         ast::Expr::Op(op, args, _, span) => {
+            if op == &ast::Op::Ref {
+                let ast::Expr::Var(name, typ, ..) = &args[0] else {
+                    unreachable!()
+                };
+                return fb.instr(
+                    result,
+                    ir::Value::Ref,
+                    vec![env.get_var(name).clone()],
+                    *span,
+                );
+            }
             let arg_vals: Vec<_> = args.iter().map(|arg| lower_expr(arg, fb, env)).collect();
             match op {
                 ast::Op::Builtin(builtin) => fb.instr(
@@ -129,6 +140,7 @@ fn lower_expr(expr: &ast::Expr, fb: &mut FuncBuilder, env: &Env) -> ir::Slot {
                         *span,
                     )
                 }
+                _ => unreachable!(),
             }
         }
         ast::Expr::Call(func, args, _, span) => {
@@ -140,7 +152,7 @@ fn lower_expr(expr: &ast::Expr, fb: &mut FuncBuilder, env: &Env) -> ir::Slot {
 
             fb.instr(result, ir::Value::Call, instr_args, *span)
         }
-        ast::Expr::Block(stmts, expr) => {
+        ast::Expr::Block(stmts, expr, span) => {
             let mut inner = env.clone();
             for stmt in stmts {
                 match stmt {
@@ -148,9 +160,31 @@ fn lower_expr(expr: &ast::Expr, fb: &mut FuncBuilder, env: &Env) -> ir::Slot {
                         let slot = lower_expr(value, fb, &inner);
                         inner.set_var(var.clone(), slot);
                     }
+                    ast::Stmt::Set(var, value) => {
+                        let val_slot = lower_expr(value, fb, &inner);
+                        let dest_slot = inner.get_var(var);
+                        fb.push(ir::Instr {
+                            result: dest_slot.clone(),
+                            value: ir::Value::Slot,
+                            args: vec![val_slot.clone()],
+                            span: dest_slot.1.span,
+                        });
+                    }
+                    ast::Stmt::Expr(value) => {
+                        lower_expr(value, fb, &inner);
+                    }
                 }
             }
-            lower_expr(expr, fb, &inner)
+            if let Some(expr) = expr {
+                lower_expr(expr, fb, &inner)
+            } else {
+                fb.instr(
+                    result,
+                    ir::Value::Literal(ast::Literal::Unit(*span)),
+                    vec![],
+                    *span,
+                )
+            }
         }
     }
 }

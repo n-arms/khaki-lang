@@ -81,6 +81,13 @@ impl FuncBuilder {
         slot
     }
 
+    pub fn push(&mut self, instr: Instr) {
+        let Some(current) = self.current.as_mut() else {
+            panic!("Pushing instr to nonexistent block");
+        };
+        current.instrs.push(instr);
+    }
+
     pub fn finish(mut self, name: String, is_cor: bool, args: Vec<Slot>, result: Type) -> Func {
         if let Some(current) = self.current.take() {
             panic!("Premature end to unfinished block {current:?}");

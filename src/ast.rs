@@ -151,11 +151,12 @@ pub enum TypeKind {
     Generic(String),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Op {
     Builtin(String),
     Await,
     Yield,
+    Ref,
 }
 
 #[derive(Clone, Debug)]
@@ -166,12 +167,14 @@ pub enum Expr {
     Literal(Literal, Option<Type>),
     Op(Op, Vec<Expr>, Option<Type>, Span),
     Call(Box<Expr>, Vec<Expr>, Option<Type>, Span),
-    Block(Vec<Stmt>, Box<Expr>),
+    Block(Vec<Stmt>, Option<Box<Expr>>, Span),
 }
 
 #[derive(Clone, Debug)]
 pub enum Stmt {
     Let(String, Expr),
+    Set(String, Expr),
+    Expr(Expr),
 }
 
 impl Expr {
@@ -182,7 +185,13 @@ impl Expr {
             | Expr::Op(_, _, typ, _)
             | Expr::Call(_, _, typ, _) => typ.clone().unwrap(),
             Expr::Func(_, _, meta, _) => meta.as_ref().unwrap().0.clone(),
-            Expr::Block(_, expr) => expr.get_type(),
+            Expr::Block(_, expr, span) => {
+                if let Some(expr) = expr {
+                    expr.get_type()
+                } else {
+                    return Type::unit(*span);
+                }
+            }
         }
     }
 }

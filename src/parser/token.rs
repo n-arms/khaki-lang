@@ -37,6 +37,8 @@ pub enum TokenKind {
     Cor,
     #[token("let")]
     Let,
+    #[token("set")]
+    Set,
     #[token("struct")]
     Struct,
     #[token("True")]
@@ -45,6 +47,8 @@ pub enum TokenKind {
     False,
     #[token("!")]
     Bang,
+    #[token("&")]
+    Ampersand,
     #[token("yield")]
     Yield,
 }

@@ -27,6 +27,7 @@ pub enum Error {
     YieldOutsideCor(Span),
     AwaitOutsideCor(Span),
     BadAwait(Type, Span),
+    BadRefLValue(Expr, Span),
 }
 
 pub fn type_program(program: &[Struct]) -> Result<HashMap<Spec, Struct>, Error> {
@@ -79,7 +80,7 @@ pub fn type_program(program: &[Struct]) -> Result<HashMap<Spec, Struct>, Error> 
                 scope.set_var(arg.clone(), typ.clone());
             }
             infer_expr(&mut func.body, &global, &mut local, &scope)?;
-            println!("Infered expr {:?}", func.body);
+            println!("Infered expr {:#?}", func.body);
             local.unify(func.result.clone(), func.body.get_type(), func.result.span);
             let sub = local.solve(&cor_list)?;
             println!("Got sub {sub:?}");

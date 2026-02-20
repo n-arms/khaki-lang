@@ -47,13 +47,17 @@ fn spec_expr(expr: &Expr, specs: &mut HashSet<Spec>) {
             }
             spec_type(typ.as_ref().unwrap(), specs);
         }
-        Expr::Block(stmts, result) => {
+        Expr::Block(stmts, result, span) => {
             for stmt in stmts {
                 match stmt {
-                    Stmt::Let(_, val) => spec_expr(val, specs),
+                    Stmt::Set(_, val) | Stmt::Expr(val) | Stmt::Let(_, val) => {
+                        spec_expr(val, specs)
+                    }
                 }
             }
-            spec_expr(result, specs);
+            if let Some(result) = result {
+                spec_expr(result, specs);
+            }
         }
     }
 }

@@ -58,6 +58,12 @@ pub fn infer_expr(
                     }
                     Type::unit(*span)
                 }
+                Op::Ref => {
+                    if !matches!(&args[0], Expr::Var(..)) {
+                        return Err(Error::BadRefLValue(args[0].clone(), *span));
+                    }
+                    Type::named("Ptr".into(), vec![args[0].get_type()], *span)
+                }
             });
         }
         Expr::Call(func, args, meta, span) => {
@@ -77,7 +83,7 @@ pub fn infer_expr(
             );
             *meta = Some(result_type);
         }
-        Expr::Block(stmts, result) => {
+        Expr::Block(stmts, result, span) => {
             let mut inner = scope.clone();
             for stmt in stmts {
                 match stmt {
@@ -85,9 +91,20 @@ pub fn infer_expr(
                         infer_expr(expr, global, local, &inner)?;
                         inner.set_var(var.clone(), expr.get_type());
                     }
+                    Stmt::Set(var, expr) => {
+                        infer_expr(expr, global, local, &inner)?;
+                        let expr_type = expr.get_type();
+                        let span = expr_type.span;
+                        local.unify(inner.get_var(var, span)?.clone(), expr_type, span);
+                    }
+                    Stmt::Expr(expr) => {
+                        infer_expr(expr, global, local, &inner)?;
+                    }
                 }
             }
-            infer_expr(result, global, local, &inner)?;
+            if let Some(result) = result {
+                infer_expr(result, global, local, &inner)?;
+            }
         }
     }
 
