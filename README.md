@@ -11,3 +11,26 @@ The Khaki compiler is based on a modern compiler architecture:
 - Unification-based Hindley-Milner type inference
 - A graph-of-basic-blocks IR that makes it easy to desugar coroutines and target LLVM
 - A backend that emits textual LLVM to be ingested by llc or clang
+
+## Examples
+```
+struct Main {
+  cor range(up_to: Int, out: Ptr[Int]): Unit {
+    let i = 0;
+    while i < up_to {
+      Ptr.store(out, i);
+      yield;
+      set i = 1.add(i);
+    }
+  }
+
+  func main(): Unit {
+    let i = 0;
+    let r = range(10, &i);
+    let result = {};
+    while (Main_range.poll(&r, &result)) {
+      Int.print(i);
+    }
+  }
+}
+```
