@@ -121,12 +121,23 @@ pub fn emit_program(
                 cor::emit_constructor(spec, func, &mut text);
                 cor::emit_poll(spec, func, &mut text);
             } else {
+                if spec.struct_name == "Main" && func.name == "main" {
+                    text.pushln("define i32 @main() {");
+                    text.pushln("entry:");
+                    text.inc();
+                    text.pushln("%exit_code = call i32 @\"Main[].main\"()");
+                    text.pushln("ret i32 %exit_code");
+                    text.dec();
+                    text.pushln("}");
+                }
                 emit_func(spec, func, &mut text);
             }
         }
     }
 
-    text.pushln("attributes #0 = { \"no-sse\" }");
+    text.pushln("attributes #0 = { noinline }");
+    text.pushln("@.str = private unnamed_addr constant [4 x i8] c\"%d\\0A\\00\"");
+    text.pushln("declare i32 @printf(i8*, ...)");
 
     text.finish()
 }
@@ -202,7 +213,7 @@ fn emit_func_prefix(struct_spec: &Spec, func: &Func, text: &mut Text) {
                 .iter()
                 .map(|arg| format!("{} {}", emit_type(&arg.1), arg_name(arg)))
         )
-    ))
+    ));
 }
 
 // emit top-level alloca's for each slot, and store the function arguments into the appropriate slots
@@ -310,6 +321,34 @@ fn emit_instr(instr: &Instr, text: &mut Text, vals: &mut LlvmVals) {
                     let b = load_slot(&instr.args[1], text, vals);
                     let temp = vals.fresh();
                     text.pushln(format!("{temp} = add {result_type} {a}, {b}"));
+                    store_result(temp, text);
+                }
+                "int_less_than" => {
+                    let a = load_slot(&instr.args[0], text, vals);
+                    let b = load_slot(&instr.args[1], text, vals);
+                    let cmp = vals.fresh();
+                    let bool = vals.fresh();
+                    let arg_type = emit_type(&instr.args[0].1);
+                    text.pushln(format!("{cmp} = icmp slt {arg_type} {a}, {b}"));
+                    text.pushln(format!("{bool} = zext i1 {cmp} to i8"));
+                    store_result(bool, text);
+                }
+                "int_print" => {
+                    let a = load_slot(&instr.args[0], text, vals);
+                    let fmt_ptr = vals.fresh();
+                    let temp = vals.fresh();
+                    text.pushln(format!(
+                        "{fmt_ptr} = getelementptr [4 x i8], [4 x i8]* @.str, i32 0, i32 0"
+                    ));
+                    text.pushln(format!(
+                        "{temp} = call i32 (i8*, ...) @printf(i8* {fmt_ptr}, i32 {a})"
+                    ));
+                    store_result("{}".into(), text);
+                }
+                "bool_not" => {
+                    let a = load_slot(&instr.args[0], text, vals);
+                    let temp = vals.fresh();
+                    text.pushln(format!("{temp} = xor i8 {a}, 1"));
                     store_result(temp, text);
                 }
                 "ptr_set" => {

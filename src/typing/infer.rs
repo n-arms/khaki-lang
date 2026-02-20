@@ -64,6 +64,15 @@ pub fn infer_expr(
                     }
                     Type::named("Ptr".into(), vec![args[0].get_type()], *span)
                 }
+                Op::If => {
+                    local.unify(Type::bool(*span), args[0].get_type(), *span);
+                    local.unify(args[1].get_type(), args[2].get_type(), *span);
+                    args[1].get_type()
+                }
+                Op::While => {
+                    local.unify(Type::bool(*span), args[0].get_type(), *span);
+                    Type::unit(*span)
+                }
             });
         }
         Expr::Call(func, args, meta, span) => {

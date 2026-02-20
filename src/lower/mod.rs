@@ -106,6 +106,58 @@ fn lower_expr(expr: &ast::Expr, fb: &mut FuncBuilder, env: &Env) -> ir::Slot {
                     *span,
                 );
             }
+            if op == &ast::Op::If {
+                let cond_val = lower_expr(&args[0], fb, env);
+                let then_branch = fb.create_block();
+                let else_branch = fb.create_block();
+                let finally_branch = fb.create_block();
+                fb.end_block(ir::End::JumpIf {
+                    slot: cond_val,
+                    then_branch,
+                    else_branch,
+                    span: *span,
+                });
+                fb.start_block(then_branch);
+                let result_slot = lower_expr(&args[1], fb, env);
+                fb.end_block(ir::End::Jump(finally_branch, *span));
+                fb.start_block(else_branch);
+                let temp = lower_expr(&args[2], fb, env);
+                fb.push(ir::Instr {
+                    result: result_slot.clone(),
+                    value: ir::Value::Slot,
+                    args: vec![temp],
+                    span: *span,
+                });
+                fb.end_block(ir::End::Jump(finally_branch, *span));
+                fb.start_block(finally_branch);
+
+                return result_slot;
+            }
+            if op == &ast::Op::While {
+                let cond_branch = fb.create_block();
+                let body_branch = fb.create_block();
+                let done_branch = fb.create_block();
+                fb.end_block(ir::End::Jump(cond_branch, *span));
+                fb.start_block(cond_branch);
+                let cond_val = lower_expr(&args[0], fb, env);
+                fb.end_block(ir::End::JumpIf {
+                    slot: cond_val,
+                    then_branch: body_branch,
+                    else_branch: done_branch,
+                    span: *span,
+                });
+                fb.start_block(body_branch);
+                lower_expr(&args[1], fb, env);
+                fb.end_block(ir::End::Jump(cond_branch, *span));
+                fb.start_block(done_branch);
+
+                return fb.instr(
+                    result,
+                    ir::Value::Literal(ast::Literal::Unit(*span)),
+                    vec![],
+                    *span,
+                );
+            }
             let arg_vals: Vec<_> = args.iter().map(|arg| lower_expr(arg, fb, env)).collect();
             match op {
                 ast::Op::Builtin(builtin) => fb.instr(
@@ -140,7 +192,7 @@ fn lower_expr(expr: &ast::Expr, fb: &mut FuncBuilder, env: &Env) -> ir::Slot {
                         *span,
                     )
                 }
-                _ => unreachable!(),
+                ast::Op::If | ast::Op::While | ast::Op::Ref => unreachable!(),
             }
         }
         ast::Expr::Call(func, args, _, span) => {

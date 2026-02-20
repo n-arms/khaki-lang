@@ -160,9 +160,35 @@ fn strukt<'a, I: Input<'a, Token = TokenKind, Span = SimpleSpan>>(
         let _ref = just(TokenKind::Ampersand)
             .then(expr.clone())
             .map_with(|(_, expr), e| Expr::Op(Op::Ref, vec![expr], None, get_span(e)));
+        let _if = just(TokenKind::If)
+            .ignore_then(expr.clone())
+            .then(
+                just(TokenKind::Then)
+                    .ignore_then(expr.clone())
+                    .then_ignore(just(TokenKind::Else))
+                    .then(expr.clone())
+                    .or(block
+                        .clone()
+                        .then_ignore(just(TokenKind::Else))
+                        .then(expr.clone())),
+            )
+            .map_with(|(cond, (if_true, if_false)), e| {
+                Expr::Op(Op::If, vec![cond, if_true, if_false], None, get_span(e))
+            });
+        let _while = just(TokenKind::While)
+            .ignore_then(expr.clone())
+            .then(block.clone())
+            .map_with(|(cond, body), e| Expr::Op(Op::While, vec![cond, body], None, get_span(e)));
         let _yield =
             just(TokenKind::Yield).map_with(|_, e| Expr::Op(Op::Yield, vec![], None, get_span(e)));
-        let base = literal.or(var).or(func).or(block).or(_yield).or(_ref);
+        let base = literal
+            .or(var)
+            .or(func)
+            .or(block)
+            .or(_yield)
+            .or(_ref)
+            .or(_if)
+            .or(_while);
 
         enum Modif {
             Call(Vec<Expr>, Span),

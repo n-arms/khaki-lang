@@ -22,15 +22,23 @@ mod typing;
 fn main() {
     let source = r#"
         struct Main {
-            func inc(p: Ptr[Int]): Unit = {
-                let x = Ptr.load(p);
-                Ptr.store(p, Int.add(x, 1))
+            cor foo(result: Ptr[Int]): Unit = {
+                let i = 0;
+                while Int.less_than(i, 10) {
+                    Ptr.store(result, i);
+                    yield;
+                    set i = Int.add(i, 1);
+                }
             }
 
-            func foo(): Int = {
-                let q = 5;
-                Main.inc(&q);
-                q
+            func main(): Int = {
+                let unit = {};
+                let i = 0;
+                let f = Main.foo(&i);
+                while Bool.not(Main_foo.poll(&f, &unit)) {
+                    Int.print(i);
+                };
+                0
             }
         }
     "#;
@@ -44,27 +52,65 @@ fn main() {
         name: "Int".into(),
         generics: Vec::new(),
         fields: OrdMap::new(),
-        funcs: HashMap::from([((
-            String::from("add"),
-            Func {
-                name: "add".into(),
-                is_cor: false,
-                args: vec![
-                    ("a".into(), int_type.clone()),
-                    ("b".into(), int_type.clone()),
-                ],
-                result: int_type.clone(),
-                body: Expr::Op(
-                    Op::Builtin("int_add".into()),
-                    vec![
-                        Expr::Var("a".into(), Some(int_type.clone()), span),
-                        Expr::Var("b".into(), Some(int_type.clone()), span),
+        funcs: HashMap::from([
+            (
+                String::from("add"),
+                Func {
+                    name: "add".into(),
+                    is_cor: false,
+                    args: vec![
+                        ("a".into(), int_type.clone()),
+                        ("b".into(), int_type.clone()),
                     ],
-                    Some(int_type),
-                    span,
-                ),
-            },
-        ))]),
+                    result: int_type.clone(),
+                    body: Expr::Op(
+                        Op::Builtin("int_add".into()),
+                        vec![
+                            Expr::Var("a".into(), Some(int_type.clone()), span),
+                            Expr::Var("b".into(), Some(int_type.clone()), span),
+                        ],
+                        Some(int_type.clone()),
+                        span,
+                    ),
+                },
+            ),
+            (
+                String::from("less_than"),
+                Func {
+                    name: "less_than".into(),
+                    is_cor: false,
+                    args: vec![
+                        ("a".into(), int_type.clone()),
+                        ("b".into(), int_type.clone()),
+                    ],
+                    result: Type::bool(span),
+                    body: Expr::Op(
+                        Op::Builtin("int_less_than".into()),
+                        vec![
+                            Expr::Var("a".into(), Some(int_type.clone()), span),
+                            Expr::Var("b".into(), Some(int_type.clone()), span),
+                        ],
+                        Some(Type::bool(span)),
+                        span,
+                    ),
+                },
+            ),
+            (
+                String::from("print"),
+                Func {
+                    name: "print".into(),
+                    is_cor: false,
+                    args: vec![("a".into(), int_type.clone())],
+                    result: Type::unit(span),
+                    body: Expr::Op(
+                        Op::Builtin("int_print".into()),
+                        vec![Expr::Var("a".into(), Some(int_type.clone()), span)],
+                        Some(Type::unit(span)),
+                        span,
+                    ),
+                },
+            ),
+        ]),
     });
     ast.push(Struct {
         name: "Unit".into(),
@@ -72,11 +118,26 @@ fn main() {
         fields: OrdMap::new(),
         funcs: HashMap::new(),
     });
+    let bool_type = Type::bool(span);
     ast.push(Struct {
         name: "Bool".into(),
         generics: Vec::new(),
         fields: OrdMap::new(),
-        funcs: HashMap::new(),
+        funcs: HashMap::from([(
+            "not".into(),
+            Func {
+                name: "not".into(),
+                args: vec![("x".into(), bool_type.clone())],
+                result: bool_type.clone(),
+                is_cor: false,
+                body: Expr::Op(
+                    Op::Builtin("bool_not".into()),
+                    vec![Expr::Var("x".into(), Some(bool_type.clone()), span)],
+                    Some(bool_type),
+                    span,
+                ),
+            },
+        )]),
     });
     let ptr = Type::named("Ptr".into(), vec![Type::generic("t", span)], span);
     ast.push(Struct {

@@ -32,18 +32,22 @@ pub fn derive_cor_structs(program: &mut Vec<Struct>) -> HashMap<String, CorParts
                         func_name: func.name.clone(),
                     },
                 );
+                let span = func.result.span;
                 let cor_generic_types: Vec<_> = strukt
                     .generics
                     .iter()
-                    .map(|name| Type::generic(name.clone(), func.result.span))
+                    .map(|name| Type::generic(name.clone(), span))
                     .collect();
-                let cor_type = Type::named(cor_name.clone(), cor_generic_types, func.result.span);
+                let cor_type = Type::named(cor_name.clone(), cor_generic_types, span);
                 let cor_func = Func {
                     name: "poll".into(),
-                    args: vec![("cor".into(), cor_type)],
-                    result: Type::bool(func.result.span),
+                    args: vec![
+                        ("cor".into(), Type::ptr(cor_type, span)),
+                        ("result".into(), Type::ptr(func.result.clone(), span)),
+                    ],
+                    result: Type::bool(span),
                     is_cor: false,
-                    body: Expr::Op(Op::Builtin("todo".into()), vec![], None, func.result.span),
+                    body: Expr::Op(Op::Builtin("todo".into()), vec![], None, span),
                 };
                 let cor_struct = Struct {
                     name: cor_name,

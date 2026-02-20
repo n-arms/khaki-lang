@@ -3,7 +3,10 @@ cors are lowered into a struct (called `cor`) with one function: `cor.poll`,
 as well as the original cor function (called the constructor), which just builds a `cor` and returns it
 */
 
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    iter,
+};
 
 use crate::{
     ast::{Type, TypeKind, cor_name},
@@ -19,7 +22,7 @@ use crate::{
 // calculate all the slots that need to be saved / restored over await points
 // we don't do fine-grained tracking of which slot needs to be saved over which gap
 fn saved_slots(func: &Func) -> Vec<Slot> {
-    let mut saved = Vec::new();
+    let mut saved = func.args.clone();
     for block in func.blocks.values() {
         let mut defined: HashSet<Slot> = HashSet::new();
         for instr in &block.instrs {
@@ -31,11 +34,7 @@ fn saved_slots(func: &Func) -> Vec<Slot> {
             defined.insert(instr.result.clone());
         }
     }
-    for arg in &func.args {
-        if !saved.contains(arg) {
-            saved.push(arg.clone());
-        }
-    }
+
     saved
 }
 
@@ -71,10 +70,8 @@ fn cor_struct_name(struct_spec: &Spec, func: &Func) -> String {
 pub fn emit_cor_struct(struct_spec: &Spec, func: &Func, text: &mut Text) {
     let slots = saved_slots(func);
     let struct_name = cor_struct_name(struct_spec, func);
-    text.pushln(format!(
-        "{struct_name} = type {{ i32, {} }}",
-        str_list(slots.iter().map(|slot| emit_type(&slot.1)))
-    ))
+    let fields = iter::once("i32".into()).chain(slots.iter().map(|slot| emit_type(&slot.1)));
+    text.pushln(format!("{struct_name} = type {{ {} }}", str_list(fields)))
 }
 
 pub fn emit_constructor(struct_spec: &Spec, func: &Func, text: &mut Text) {
@@ -105,8 +102,12 @@ pub fn emit_constructor(struct_spec: &Spec, func: &Func, text: &mut Text) {
         ));
         current_struct = new_struct;
     }
+    let final_struct = vals.fresh();
+    text.pushln(format!(
+        "{final_struct} = insertvalue {struct_name} {current_struct}, i32 0, 0"
+    ));
 
-    text.pushln(format!("ret {struct_name} {current_struct}"));
+    text.pushln(format!("ret {struct_name} {final_struct}"));
 
     text.dec();
     text.pushln("}");

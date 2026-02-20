@@ -39,6 +39,14 @@ pub enum TokenKind {
     Let,
     #[token("set")]
     Set,
+    #[token("if")]
+    If,
+    #[token("then")]
+    Then,
+    #[token("else")]
+    Else,
+    #[token("while")]
+    While,
     #[token("struct")]
     Struct,
     #[token("True")]

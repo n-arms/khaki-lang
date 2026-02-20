@@ -116,6 +116,10 @@ impl Type {
         }
     }
 
+    pub fn ptr(typ: Type, span: Span) -> Self {
+        Self::named("Ptr".into(), vec![typ], span)
+    }
+
     pub fn func(args: Vec<Type>, result: Type, span: Span) -> Type {
         let mut children = args;
         children.push(result);
@@ -157,6 +161,8 @@ pub enum Op {
     Await,
     Yield,
     Ref,
+    If,
+    While,
 }
 
 #[derive(Clone, Debug)]
