@@ -16,6 +16,42 @@ pub struct CorParts {
     pub func_name: String,
 }
 
+// add Foo.Foo function for each struct Foo
+pub fn derive_constructors(program: &mut Vec<Struct>) {
+    for strukt in program.iter_mut() {
+        let span = strukt.span;
+        let (func_args, op_args) = strukt
+            .fields
+            .iter()
+            .map(|(name, typ)| {
+                let expr = Expr::Var(name.clone(), None, span);
+                ((name.clone(), typ.clone()), expr)
+            })
+            .unzip();
+        let result = Type::named(
+            strukt.name.clone(),
+            strukt
+                .generics
+                .iter()
+                .map(|name| Type::generic(name, span))
+                .collect(),
+            span,
+        );
+
+        let body = Expr::Op(Op::Constructor(strukt.name.clone()), op_args, None, span);
+
+        let func = Func {
+            name: strukt.name.clone(),
+            args: func_args,
+            result,
+            is_cor: false,
+            body,
+        };
+
+        strukt.funcs.insert(strukt.name.clone(), func);
+    }
+}
+
 // add the appropriate cor + cor.poll struct + function for each cor, returning the list of generated structs
 pub fn derive_cor_structs(program: &mut Vec<Struct>) -> HashMap<String, CorParts> {
     let mut structs = Vec::new();
@@ -54,6 +90,7 @@ pub fn derive_cor_structs(program: &mut Vec<Struct>) -> HashMap<String, CorParts
                     generics: strukt.generics.clone(),
                     fields: OrdMap::new(),
                     funcs: HashMap::from([("poll".into(), cor_func)]),
+                    span: func.result.span,
                 };
                 structs.push(cor_struct);
             }

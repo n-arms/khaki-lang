@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::{
-    ast::{self, Type},
+    ast::{self, Type, TypeKind},
     ir,
     lower::builder::FuncBuilder,
     typing::Spec,
@@ -192,6 +192,40 @@ fn lower_expr(expr: &ast::Expr, fb: &mut FuncBuilder, env: &Env) -> ir::Slot {
                         *span,
                     )
                 }
+                ast::Op::Get(field_index) => {
+                    let struct_type = arg_vals[0].1.clone();
+                    let TypeKind::Named(struct_name) = &struct_type.kind else {
+                        unreachable!();
+                    };
+                    let struct_ref = fb.instr(
+                        Type::ptr(struct_type, *span),
+                        ir::Value::Ref,
+                        arg_vals.clone(),
+                        *span,
+                    );
+                    let field_ptr = fb.instr(
+                        Type::ptr(result.clone(), *span),
+                        ir::Value::FieldRef(*field_index),
+                        vec![struct_ref],
+                        *span,
+                    );
+                    fb.instr(
+                        result,
+                        ir::Value::Op(ir::Op::Builtin("ptr_get".into())),
+                        vec![field_ptr],
+                        *span,
+                    )
+                }
+                ast::Op::Constructor(..) => {
+                    let TypeKind::Named(struct_name) = &result.kind else {
+                        unreachable!();
+                    };
+                    let spec = Spec {
+                        struct_name: struct_name.clone(),
+                        generics: result.children.clone(),
+                    };
+                    fb.instr(result, ir::Value::PackStruct(spec), arg_vals, *span)
+                }
                 ast::Op::If | ast::Op::While | ast::Op::Ref => unreachable!(),
             }
         }
@@ -238,5 +272,6 @@ fn lower_expr(expr: &ast::Expr, fb: &mut FuncBuilder, env: &Env) -> ir::Slot {
                 )
             }
         }
+        ast::Expr::Field(..) => unreachable!(),
     }
 }

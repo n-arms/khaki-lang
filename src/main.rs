@@ -2,7 +2,7 @@ use std::{collections::HashMap, fs};
 
 use crate::{
     ast::{Expr, Func, Op, Span, Struct, Type},
-    derive::derive_cor_structs,
+    derive::{derive_constructors, derive_cor_structs},
     emit::emit_program,
     lower::lower_program,
     ord_map::OrdMap,
@@ -20,26 +20,37 @@ mod parser;
 mod typing;
 
 fn main() {
-    let source = r#"
-        struct Main {
-            cor foo(result: Ptr[Int]): Unit = {
-                let i = 0;
-                while Int.less_than(i, 10) {
-                    Ptr.store(result, i);
-                    yield;
-                    set i = Int.add(i, 1);
-                }
-            }
+    // let source = r#"
+    //     struct Main {
+    //         cor foo(result: Ptr[Int]): Unit = {
+    //             let i = 0;
+    //             while Int.less_than(i, 10) {
+    //                 Ptr.store(result, i);
+    //                 yield;
+    //                 set i = Int.add(i, 1);
+    //             }
+    //         }
 
-            func main(): Int = {
-                let unit = {};
-                let i = 0;
-                let f = Main.foo(&i);
-                while Bool.not(Main_foo.poll(&f, &unit)) {
-                    Int.print(i);
-                };
-                0
-            }
+    //         func main(): Int = {
+    //             let unit = {};
+    //             let i = 0;
+    //             let f = Main.foo(&i);
+    //             while Bool.not(Main_foo.poll(&f, &unit)) {
+    //                 Int.print(i);
+    //             };
+    //             0
+    //         }
+    //     }
+    // "#;
+    let source = r#"
+        struct Pair {
+            x: Int
+            y: Int
+            func first(p: Pair): Int = p.x
+            func second(p: Pair): Int = p.y
+        }
+        struct Main {
+            func main(): Int = Pair.first(Pair(3, 4))
         }
     "#;
 
@@ -50,6 +61,7 @@ fn main() {
     let int_type = Type::int(span);
     ast.push(Struct {
         name: "Int".into(),
+        span,
         generics: Vec::new(),
         fields: OrdMap::new(),
         funcs: HashMap::from([
@@ -114,6 +126,7 @@ fn main() {
     });
     ast.push(Struct {
         name: "Unit".into(),
+        span,
         generics: Vec::new(),
         fields: OrdMap::new(),
         funcs: HashMap::new(),
@@ -121,6 +134,7 @@ fn main() {
     let bool_type = Type::bool(span);
     ast.push(Struct {
         name: "Bool".into(),
+        span,
         generics: Vec::new(),
         fields: OrdMap::new(),
         funcs: HashMap::from([(
@@ -142,6 +156,7 @@ fn main() {
     let ptr = Type::named("Ptr".into(), vec![Type::generic("t", span)], span);
     ast.push(Struct {
         name: "Ptr".into(),
+        span,
         generics: vec!["t".into()],
         fields: OrdMap::new(),
         funcs: HashMap::from([
@@ -184,6 +199,7 @@ fn main() {
         ]),
     });
 
+    derive_constructors(&mut ast);
     let cor_structs = derive_cor_structs(&mut ast);
     dbg!(&ast);
     let typed = type_program(&ast).unwrap();

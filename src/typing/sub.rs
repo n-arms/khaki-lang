@@ -59,7 +59,7 @@ impl Sub {
 
     fn expr(&self, expr: &mut Expr) {
         match expr {
-            Expr::Literal(_, typ) | Expr::Var(_, typ, _) => {
+            Expr::Literal(_, typ) | Expr::Var(_, typ, _) | Expr::Field(_, _, typ, _) => {
                 if let Some(typ) = typ {
                     self.typ(typ)
                 }
@@ -99,6 +99,7 @@ impl Sub {
                     self.expr(result);
                 }
             }
+            Expr::Field(expr, _, _, span) => todo!(),
         }
     }
 

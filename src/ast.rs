@@ -17,6 +17,7 @@ pub struct Struct {
     pub generics: Vec<String>,
     pub fields: OrdMap<String, Type>,
     pub funcs: HashMap<String, Func>,
+    pub span: Span,
 }
 
 #[derive(Clone, Debug)]
@@ -36,6 +37,10 @@ impl Func {
 
 pub fn cor_name(strukt: &str, func: &str) -> String {
     format!("{strukt}_{func}")
+}
+
+pub fn constructor_name(strukt: &str) -> String {
+    strukt.to_owned()
 }
 
 #[derive(Clone)]
@@ -163,6 +168,8 @@ pub enum Op {
     Ref,
     If,
     While,
+    Get(usize),
+    Constructor(String),
 }
 
 #[derive(Clone, Debug)]
@@ -174,6 +181,7 @@ pub enum Expr {
     Op(Op, Vec<Expr>, Option<Type>, Span),
     Call(Box<Expr>, Vec<Expr>, Option<Type>, Span),
     Block(Vec<Stmt>, Option<Box<Expr>>, Span),
+    Field(Box<Expr>, String, Option<Type>, Span),
 }
 
 #[derive(Clone, Debug)]
@@ -189,6 +197,7 @@ impl Expr {
             Expr::Var(_, typ, _)
             | Expr::Literal(_, typ)
             | Expr::Op(_, _, typ, _)
+            | Expr::Field(_, _, typ, _)
             | Expr::Call(_, _, typ, _) => typ.clone().unwrap(),
             Expr::Func(_, _, meta, _) => meta.as_ref().unwrap().0.clone(),
             Expr::Block(_, expr, span) => {

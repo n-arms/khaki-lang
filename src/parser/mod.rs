@@ -13,7 +13,7 @@ use chumsky::{
 use logos::Logos;
 
 use crate::{
-    ast::{Expr, Func, Literal, Op, Span, Stmt, Struct, Type, TypeKind},
+    ast::{Expr, Func, Literal, Op, Span, Stmt, Struct, Type, TypeKind, constructor_name},
     parser::token::TokenKind,
 };
 
@@ -109,17 +109,21 @@ fn strukt<'a, I: Input<'a, Token = TokenKind, Span = SimpleSpan>>(
             .map(|lit| Expr::Literal(lit, None));
         let var = name(input).map_with(|name, e| Expr::Var(name, None, get_span(e)));
 
-        let func = upper_name(input)
+        let func_or_constructor = upper_name(input)
             .then(
                 list(typ.clone())
                     .delimited_by(just(TokenKind::LeftSquare), just(TokenKind::RightSquare))
                     .or_not()
                     .map(|list| list.unwrap_or_default()),
             )
-            .then_ignore(just(TokenKind::Dot))
-            .then(name(input))
+            .then(just(TokenKind::Dot).ignore_then(name(input)).or_not())
             .map_with(|((struct_name, generics), func_name), e| {
-                Expr::Func(struct_name, func_name, None, get_span(e))
+                if let Some(func_name) = func_name {
+                    Expr::Func(struct_name, func_name, None, get_span(e))
+                } else {
+                    let constructor = constructor_name(&struct_name);
+                    Expr::Func(struct_name, constructor, None, get_span(e))
+                }
             });
         let let_set_stmt = just(TokenKind::Let)
             .or(just(TokenKind::Set))
@@ -183,7 +187,7 @@ fn strukt<'a, I: Input<'a, Token = TokenKind, Span = SimpleSpan>>(
             just(TokenKind::Yield).map_with(|_, e| Expr::Op(Op::Yield, vec![], None, get_span(e)));
         let base = literal
             .or(var)
-            .or(func)
+            .or(func_or_constructor)
             .or(block)
             .or(_yield)
             .or(_ref)
@@ -193,13 +197,17 @@ fn strukt<'a, I: Input<'a, Token = TokenKind, Span = SimpleSpan>>(
         enum Modif {
             Call(Vec<Expr>, Span),
             Await(Span),
+            Field(String, Span),
         }
 
         let call_modif = list(expr.clone())
             .delimited_by(just(TokenKind::LeftParen), just(TokenKind::RightParen))
             .map_with(|args, e| Modif::Call(args, get_span(e)));
         let await_modif = just(TokenKind::Bang).map_with(|_, e| Modif::Await(get_span(e)));
-        let modif = call_modif.or(await_modif);
+        let field_modif = just(TokenKind::Dot)
+            .ignore_then(name(input))
+            .map_with(|name, e| Modif::Field(name, get_span(e)));
+        let modif = call_modif.or(await_modif).or(field_modif);
 
         base.then(modif.repeated().collect::<Vec<_>>())
             .map_with(|(mut expr, modifs), e| {
@@ -207,6 +215,9 @@ fn strukt<'a, I: Input<'a, Token = TokenKind, Span = SimpleSpan>>(
                     expr = match modif {
                         Modif::Call(args, span) => Expr::Call(Box::new(expr), args, None, span),
                         Modif::Await(span) => Expr::Op(Op::Await, vec![expr], None, span),
+                        Modif::Field(field_name, span) => {
+                            Expr::Field(Box::new(expr), field_name, None, span)
+                        }
                     };
                 }
                 expr
@@ -243,10 +254,10 @@ fn strukt<'a, I: Input<'a, Token = TokenKind, Span = SimpleSpan>>(
                 .or_not(),
         )
         .then_ignore(just(TokenKind::LeftBrace))
-        .then(field.repeated().collect::<HashMap<_, _>>())
+        .then(field.repeated().collect::<Vec<_>>())
         .then(func.repeated().collect::<Vec<_>>())
         .then_ignore(just(TokenKind::RightBrace))
-        .map(|(((name, generics), fields), funcs)| Struct {
+        .map_with(|(((name, generics), fields), funcs), e| Struct {
             name,
             generics: generics.unwrap_or_default(),
             fields: fields.into_iter().collect(),
@@ -254,6 +265,7 @@ fn strukt<'a, I: Input<'a, Token = TokenKind, Span = SimpleSpan>>(
                 .into_iter()
                 .map(|func| (func.name.clone(), func))
                 .collect(),
+            span: get_span(e),
         })
 }
 
@@ -347,5 +359,84 @@ mod tests {
             }
         "#;
         test_parse(source);
+    }
+
+    #[test]
+    fn cors() {
+        let source = r#"
+            struct Main {
+                cor foo(y: Int): Int = {
+                    yield;
+                    let x = y;
+                    yield
+                    x
+                }
+
+                cor bar(x: Int): Int = {
+                    yield;
+                    let q = Main.foo(Int.add(x, 1))!;
+                    q
+                }
+
+                func poll_twice(sm: Ptr[Main_bar], result: Ptr[Int]): Unit = {
+                    Main_bar.poll(sm, result);
+                    Main_bar.poll(sm, result);
+                }
+
+                func main(): Int = {
+                    let sm = Main.bar(3);
+                }
+            }
+        "#;
+    }
+
+    #[test]
+    fn blocks_loops_ifs() {
+        let source = r#"
+            struct Main {
+                func main(): Int = {
+                    let total = 0;
+                    let i = 0;
+                    while Int.less_than(i, 10) {
+                        if Int.less_than(i, 5) {
+                            set total = Int.add(total, i);
+                        } else {}
+                        set i = Int.add(i, 1);
+                    }
+                    total
+                }
+            }
+        "#;
+    }
+
+    #[test]
+    fn getters_ref() {
+        let source = r#"
+            struct Pair[x, y] {
+                a: x
+                b: y
+                func first(p: Pair[x, y]): x = p.a
+            }
+
+            struct Foo {
+                func f(p: Pair[Int, Int]): Int = {
+                    let x = p.a;
+                    Ptr.store(&x, 7);
+                    x
+                }
+            }
+        "#;
+    }
+
+    #[test]
+    fn ufcs() {
+        let source = r#"
+            struct Foo {
+                func double(x: Int): Int = Int.add(x, x)
+                func f(): Bool = {
+                    3.less_than(1.double())
+                }
+            }
+        "#;
     }
 }

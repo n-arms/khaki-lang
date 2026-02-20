@@ -6,15 +6,9 @@ I think none of these require changes to type system? Automated struct getters/s
 
 ## Booleans
 - Boolean operations like and, or, etc
-- If statements
 
 ## Structs
 - Automatically generate getters, setters, field pointer projectors, constructors
-
-## Loops and if statements
-- While and if are simple
-- What should for look like?
-  - Maybe it runs on a cor?
 
 ### For loop design
 - should take a `cor (): T` and produce the `T`

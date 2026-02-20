@@ -23,7 +23,7 @@ pub fn spec_func(func: &Func) -> impl IntoIterator<Item = Spec> {
 
 fn spec_expr(expr: &Expr, specs: &mut HashSet<Spec>) {
     match expr {
-        Expr::Literal(_, typ) | Expr::Var(_, typ, _) => {
+        Expr::Literal(_, typ) | Expr::Var(_, typ, _) | Expr::Field(_, _, typ, _) => {
             spec_type(typ.as_ref().unwrap(), specs);
         }
         Expr::Func(struct_name, _, meta, _) => {

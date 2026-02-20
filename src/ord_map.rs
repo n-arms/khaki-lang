@@ -18,6 +18,16 @@ impl<K: PartialEq, V> OrdMap<K, V> {
             .find_map(|(k, v)| if k == key.borrow() { Some(v) } else { None })
     }
 
+    pub fn find_index<Q: Borrow<K>>(&self, key: Q) -> Option<usize> {
+        self.iter()
+            .enumerate()
+            .find_map(|(i, (k, _))| if k == key.borrow() { Some(i) } else { None })
+    }
+
+    pub fn get_index(&self, index: usize) -> Option<&(K, V)> {
+        self.0.get(index)
+    }
+
     pub fn get_mut<Q: Borrow<K>>(&mut self, key: Q) -> Option<&mut V> {
         self.iter_mut()
             .find_map(|(k, v)| if k == key.borrow() { Some(v) } else { None })

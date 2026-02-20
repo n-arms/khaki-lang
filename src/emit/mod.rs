@@ -389,5 +389,32 @@ fn emit_instr(instr: &Instr, text: &mut Text, vals: &mut LlvmVals) {
         Value::Ref => {
             store_result(slot_name(&instr.args[0]), text);
         }
+        Value::FieldRef(index) => {
+            let container_ptr = load_slot(&instr.args[0], text, vals);
+            let field_ptr = vals.fresh();
+            let TypeKind::Named(ptr) = &instr.args[0].1.kind else {
+                unreachable!()
+            };
+            assert_eq!(ptr, "Ptr");
+            let container_type = emit_type(&instr.args[0].1.children[0]);
+            text.pushln(format!(
+                    "{field_ptr} = getelementptr {container_type}, {container_type}* {container_ptr}, i32 0, i32 {index}"
+                ));
+            store_result(field_ptr, text);
+        }
+        Value::PackStruct(spec) => {
+            let struct_slot = slot_name(&instr.result);
+            for (i, arg) in instr.args.iter().enumerate() {
+                let arg_slot = load_slot(arg, text, vals);
+                let field_ptr = vals.fresh();
+                text.pushln(format!(
+                    "{field_ptr} = getelementptr {result_type}, {result_type}* {struct_slot}, i32 0, i32 {i}"
+                ));
+                let arg_type = emit_type(&arg.1);
+                text.pushln(format!(
+                    "store {arg_type} {arg_slot}, {arg_type}* {field_ptr}"
+                ));
+            }
+        }
     }
 }

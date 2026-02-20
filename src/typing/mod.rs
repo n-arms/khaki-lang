@@ -28,6 +28,7 @@ pub enum Error {
     AwaitOutsideCor(Span),
     BadAwait(Type, Span),
     BadRefLValue(Expr, Span),
+    NeedsTypeAnnotation(Box<Expr>, Span),
 }
 
 pub fn type_program(program: &[Struct]) -> Result<HashMap<Spec, Struct>, Error> {

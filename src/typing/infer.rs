@@ -1,5 +1,5 @@
 use crate::{
-    ast::{Expr, Literal, Op, Span, Stmt, Type, cor_name},
+    ast::{Expr, Literal, Op, Span, Stmt, Type, TypeKind, cor_name},
     typing::{
         Error,
         env::{Global, Local, Scope},
@@ -13,6 +13,12 @@ pub fn infer_expr(
     local: &mut Local,
     scope: &Scope,
 ) -> Result<(), Error> {
+    println!("infer {expr:?}");
+    if matches!(expr, Expr::Call(..)) {
+        if try_dot_call(expr, global, local, scope)? {
+            return Ok(());
+        };
+    }
     match expr {
         Expr::Var(name, typ, span) => {
             *typ = Some(scope.get_var(name, *span)?.clone());
@@ -73,6 +79,8 @@ pub fn infer_expr(
                     local.unify(Type::bool(*span), args[0].get_type(), *span);
                     Type::unit(*span)
                 }
+                Op::Constructor(..) => local.fresh(*span),
+                Op::Get(_) => unreachable!(),
             });
         }
         Expr::Call(func, args, meta, span) => {
@@ -115,9 +123,106 @@ pub fn infer_expr(
                 infer_expr(result, global, local, &inner)?;
             }
         }
+        Expr::Field(struct_expr, field_name, typ, span) => {
+            infer_expr(struct_expr, global, local, scope)?;
+            let struct_type = struct_expr.get_type();
+            let TypeKind::Named(struct_name) = &struct_type.kind else {
+                return Err(Error::NeedsTypeAnnotation(struct_expr.clone(), *span));
+            };
+            let strukt = global.get_struct(struct_name, *span)?;
+            let mut generic_sub = Sub::default();
+            for (name, typ) in strukt.generics.iter().zip(&struct_type.children) {
+                generic_sub.set_generic(name.clone(), typ.clone());
+            }
+            if let Some(mut field_type) = strukt.fields.get(&*field_name).cloned() {
+                generic_sub.typ(&mut field_type);
+                let index = strukt.fields.find_index(&*field_name).unwrap();
+                *expr = Expr::Op(
+                    Op::Get(index),
+                    vec![struct_expr.as_ref().clone()],
+                    Some(field_type),
+                    *span,
+                );
+            } else if let Some(func) = strukt.funcs.get(field_name) {
+                todo!()
+            } else {
+                return Err(Error::UnknownName(field_name.clone(), *span));
+            }
+        }
     }
 
     Ok(())
+}
+
+/// if expr = value.method(args...), then *expr = ValueType.method(value, args...)
+/// if returns Ok(true), then the dot call was inferred, and it doesn't need to be processed
+fn try_dot_call(
+    expr: &mut Expr,
+    global: &Global,
+    local: &mut Local,
+    scope: &Scope,
+) -> Result<bool, Error> {
+    println!("try dot call with expr {expr:?}");
+    let Expr::Call(func, args, _, call_span) = expr else {
+        return Ok(false);
+    };
+    let call_span = *call_span;
+
+    let Expr::Field(struct_expr, method_name, _, field_span) = func.as_mut() else {
+        return Ok(false);
+    };
+
+    println!("got struct_expr {struct_expr:?}, method name {method_name:?}, args {args:?}");
+    for arg in args.iter_mut() {
+        infer_expr(arg, global, local, scope)?;
+    }
+    infer_expr(struct_expr, global, local, scope)?;
+    println!("infered elems to struct expr {struct_expr:?}, args {args:?}");
+    let struct_type = struct_expr.get_type();
+    let TypeKind::Named(struct_name) = &struct_type.kind else {
+        return Err(Error::NeedsTypeAnnotation(struct_expr.clone(), *field_span));
+    };
+    let strukt = global.get_struct(struct_name, *field_span)?;
+    let Some(func) = strukt.funcs.get(method_name) else {
+        // could still be a method, try it type it as (value.field)(args...)
+        return Ok(false);
+    };
+    let mut generic_sub = Sub::default();
+    let generics = struct_type.children.clone();
+    for (name, typ) in strukt.generics.iter().zip(&generics) {
+        generic_sub.set_generic(name.clone(), typ.clone());
+    }
+
+    let result_type = if func.is_cor {
+        Type::named(
+            cor_name(&strukt.name, &func.name),
+            generics.clone(),
+            *field_span,
+        )
+    } else {
+        func.result.clone()
+    };
+    let mut func_type = Type::func(func.arg_types(), result_type.clone(), *field_span);
+    generic_sub.typ(&mut func_type);
+
+    let func_expr = Expr::Func(
+        struct_name.clone(),
+        method_name.clone(),
+        Some((func_type, generics)),
+        *field_span,
+    );
+
+    let mut args = args.clone();
+    args.insert(0, struct_expr.as_ref().clone());
+
+    *expr = Expr::Call(
+        Box::new(func_expr),
+        args,
+        Some(result_type.clone()),
+        call_span,
+    );
+    println!("built new expr {expr:?}");
+    Ok(true)
 }
 
 fn instantiate(generics: &[String], local: &mut Local, span: Span) -> (Vec<Type>, Sub) {

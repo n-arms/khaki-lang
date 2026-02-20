@@ -51,6 +51,8 @@ pub enum Value {
     Op(Op),
     Call,
     Ref,
+    FieldRef(usize),
+    PackStruct(Spec),
 }
 
 #[derive(Clone, Debug)]
