@@ -20,28 +20,6 @@ mod parser;
 mod typing;
 
 fn main() {
-    // let source = r#"
-    //     struct Main {
-    //         cor foo(result: Ptr[Int]): Unit = {
-    //             let i = 0;
-    //             while Int.less_than(i, 10) {
-    //                 Ptr.store(result, i);
-    //                 yield;
-    //                 set i = Int.add(i, 1);
-    //             }
-    //         }
-
-    //         func main(): Int = {
-    //             let unit = {};
-    //             let i = 0;
-    //             let f = Main.foo(&i);
-    //             while Bool.not(Main_foo.poll(&f, &unit)) {
-    //                 Int.print(i);
-    //             };
-    //             0
-    //         }
-    //     }
-    // "#;
     let source = r#"
         struct Pair {
             x: Int
