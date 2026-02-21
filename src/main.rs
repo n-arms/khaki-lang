@@ -21,14 +21,17 @@ mod typing;
 
 fn main() {
     let source = r#"
-        struct Pair {
-            x: Int
-            y: Int
-            func first(p: Pair): Int = p.x
-            func second(p: Pair): Int = p.y
+        struct SpiConfig {
+            baud_rate: Int
+            clock_speed: Int
         }
+
         struct Main {
-            func main(): Int = Pair.first(Pair(3, 4))
+            func main(): Int = {
+                let config = SpiConfig(100, 1000);
+                set config.baud_rate = 10;
+                config.baud_rate
+            }
         }
     "#;
 

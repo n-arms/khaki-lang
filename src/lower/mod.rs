@@ -96,15 +96,7 @@ fn lower_expr(expr: &ast::Expr, fb: &mut FuncBuilder, env: &Env) -> ir::Slot {
         ),
         ast::Expr::Op(op, args, _, span) => {
             if op == &ast::Op::Ref {
-                let ast::Expr::Var(name, typ, ..) = &args[0] else {
-                    unreachable!()
-                };
-                return fb.instr(
-                    result,
-                    ir::Value::Ref,
-                    vec![env.get_var(name).clone()],
-                    *span,
-                );
+                return lower_lvalue_ref(&args[0], fb, env);
             }
             if op == &ast::Op::If {
                 let cond_val = lower_expr(&args[0], fb, env);
@@ -226,6 +218,12 @@ fn lower_expr(expr: &ast::Expr, fb: &mut FuncBuilder, env: &Env) -> ir::Slot {
                     };
                     fb.instr(result, ir::Value::PackStruct(spec), arg_vals, *span)
                 }
+                ast::Op::Deref => fb.instr(
+                    result,
+                    ir::Value::Op(ir::Op::Builtin("ptr_get".into())),
+                    arg_vals,
+                    *span,
+                ),
                 ast::Op::If | ast::Op::While | ast::Op::Ref => unreachable!(),
             }
         }
@@ -246,15 +244,15 @@ fn lower_expr(expr: &ast::Expr, fb: &mut FuncBuilder, env: &Env) -> ir::Slot {
                         let slot = lower_expr(value, fb, &inner);
                         inner.set_var(var.clone(), slot);
                     }
-                    ast::Stmt::Set(var, value) => {
+                    ast::Stmt::Set(lval, value) => {
                         let val_slot = lower_expr(value, fb, &inner);
-                        let dest_slot = inner.get_var(var);
-                        fb.push(ir::Instr {
-                            result: dest_slot.clone(),
-                            value: ir::Value::Slot,
-                            args: vec![val_slot.clone()],
-                            span: dest_slot.1.span,
-                        });
+                        let lvalue_ptr_slot = lower_lvalue_ref(lval, fb, &inner);
+                        fb.instr(
+                            Type::unit(*span),
+                            ir::Value::Op(ir::Op::Builtin("ptr_set".into())),
+                            vec![lvalue_ptr_slot, val_slot],
+                            *span,
+                        );
                     }
                     ast::Stmt::Expr(value) => {
                         lower_expr(value, fb, &inner);
@@ -273,5 +271,36 @@ fn lower_expr(expr: &ast::Expr, fb: &mut FuncBuilder, env: &Env) -> ir::Slot {
             }
         }
         ast::Expr::Field(..) => unreachable!(),
+    }
+}
+
+// the resulting slot contains the address of the lvalue, enabling you to write to the lvalue with ptr_set
+fn lower_lvalue_ref(expr: &ast::Expr, fb: &mut FuncBuilder, env: &Env) -> ir::Slot {
+    let lvalue_type = expr.get_type();
+    let span = lvalue_type.span;
+    let result = Type::ptr(lvalue_type, span);
+    match expr {
+        ast::Expr::Var(name, _, span) => fb.instr(
+            result,
+            ir::Value::Ref,
+            vec![env.get_var(name).clone()],
+            *span,
+        ),
+        ast::Expr::Op(ast::Op::Deref, args, ..) => lower_expr(&args[0], fb, env),
+        ast::Expr::Op(ast::Op::Get(field_index), args, _, span) => {
+            let container_ptr = lower_lvalue_ref(&args[0], fb, env);
+            fb.instr(
+                result,
+                ir::Value::FieldRef(*field_index),
+                vec![container_ptr],
+                *span,
+            )
+        }
+        ast::Expr::Func(..)
+        | ast::Expr::Field(..)
+        | ast::Expr::Op(..)
+        | ast::Expr::Literal(..)
+        | ast::Expr::Call(..)
+        | ast::Expr::Block(..) => unreachable!(),
     }
 }

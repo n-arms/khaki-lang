@@ -1,28 +1,10 @@
 # Features
-I think none of these require changes to type system? Automated struct setters/ref projection operators require more derive functionality.
-
-## Name
-- Small
-- Embedded
-- C-like (sea like?)
-- Simple
-- Microcontroller
 
 ## Integers
 - Basic operations like add, sub, comparisons, etc
 
 ## Booleans
 - Boolean operations like and, or, etc
-
-## Structs
-- How does field mutation work?
-- How does field ref projection work?
-
-- ptr `prj` field => does &ptr->field
-- Interpret `set var.field = value` => `Ptr.store(ptr prj field, value)`
-- Do I want to write `ptr prj field` in code?
-  - C-style `&ptr->field`
-  - New operator `ptr|>field`
 
 ### For loop design
 - should take a `cor (): T` and produce the `T`

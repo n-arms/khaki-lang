@@ -65,10 +65,13 @@ pub fn infer_expr(
                     Type::unit(*span)
                 }
                 Op::Ref => {
-                    if !matches!(&args[0], Expr::Var(..)) {
-                        return Err(Error::BadRefLValue(args[0].clone(), *span));
-                    }
+                    ensure_lvalue(&args[0], *span)?;
                     Type::named("Ptr".into(), vec![args[0].get_type()], *span)
+                }
+                Op::Deref => {
+                    let result = local.fresh(*span);
+                    local.unify(args[0].get_type(), Type::ptr(result.clone(), *span), *span);
+                    result
                 }
                 Op::If => {
                     local.unify(Type::bool(*span), args[0].get_type(), *span);
@@ -84,7 +87,6 @@ pub fn infer_expr(
             });
         }
         Expr::Call(func, args, meta, span) => {
-            let result_type = local.fresh(*span);
             let arg_types: Vec<_> = args
                 .iter_mut()
                 .map(|arg| {
@@ -93,11 +95,23 @@ pub fn infer_expr(
                 })
                 .collect::<Result<_, _>>()?;
             infer_expr(func, global, local, scope)?;
-            local.unify(
-                Type::func(arg_types, result_type.clone(), *span),
-                func.get_type(),
-                *span,
-            );
+
+            let func_type = func.get_type();
+
+            let result_type = if let TypeKind::Func = func_type.kind {
+                for (expected, arg_type) in func_type.children.iter().zip(arg_types) {
+                    local.unify(arg_type, expected.clone(), *span);
+                }
+                func_type.children.last().unwrap().clone()
+            } else {
+                let result_type = local.fresh(*span);
+                local.unify(
+                    Type::func(arg_types, result_type.clone(), *span),
+                    func.get_type(),
+                    *span,
+                );
+                result_type
+            };
             *meta = Some(result_type);
         }
         Expr::Block(stmts, result, span) => {
@@ -108,11 +122,12 @@ pub fn infer_expr(
                         infer_expr(expr, global, local, &inner)?;
                         inner.set_var(var.clone(), expr.get_type());
                     }
-                    Stmt::Set(var, expr) => {
+                    Stmt::Set(lval, expr) => {
+                        infer_expr(lval, global, local, &inner)?;
                         infer_expr(expr, global, local, &inner)?;
                         let expr_type = expr.get_type();
                         let span = expr_type.span;
-                        local.unify(inner.get_var(var, span)?.clone(), expr_type, span);
+                        local.unify(lval.get_type(), expr_type, span);
                     }
                     Stmt::Expr(expr) => {
                         infer_expr(expr, global, local, &inner)?;
@@ -151,6 +166,17 @@ pub fn infer_expr(
         }
     }
 
+    Ok(())
+}
+
+fn ensure_lvalue(lvalue: &Expr, set_span: Span) -> Result<(), Error> {
+    match lvalue {
+        Expr::Field(inner, ..) => {
+            ensure_lvalue(inner, set_span)?;
+        }
+        Expr::Var(..) | Expr::Op(Op::Deref, _, ..) => {}
+        _ => return Err(Error::BadLValue(lvalue.clone(), set_span)),
+    }
     Ok(())
 }
 

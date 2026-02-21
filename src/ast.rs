@@ -166,6 +166,7 @@ pub enum Op {
     Await,
     Yield,
     Ref,
+    Deref,
     If,
     While,
     Get(usize),
@@ -187,7 +188,7 @@ pub enum Expr {
 #[derive(Clone, Debug)]
 pub enum Stmt {
     Let(String, Expr),
-    Set(String, Expr),
+    Set(Expr, Expr),
     Expr(Expr),
 }
 

@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::ops::Range;
 
 use chumsky::{
@@ -125,20 +124,18 @@ fn strukt<'a, I: Input<'a, Token = TokenKind, Span = SimpleSpan>>(
                     Expr::Func(struct_name, constructor, None, get_span(e))
                 }
             });
-        let let_set_stmt = just(TokenKind::Let)
-            .or(just(TokenKind::Set))
-            .then(name(input))
+        let let_stmt = just(TokenKind::Let)
+            .ignore_then(name(input))
             .then_ignore(just(TokenKind::Equals))
             .then(expr.clone())
-            .map(|((let_set, var), val)| {
-                if let_set == TokenKind::Let {
-                    Stmt::Let(var, val)
-                } else {
-                    Stmt::Set(var, val)
-                }
-            });
+            .map(|(var, val)| Stmt::Let(var, val));
+        let set_stmt = just(TokenKind::Set)
+            .ignore_then(expr.clone())
+            .then_ignore(just(TokenKind::Equals))
+            .then(expr.clone())
+            .map(|(lval, val)| Stmt::Set(lval, val));
         let expr_stmt = expr.clone().map(Stmt::Expr);
-        let stmt = let_set_stmt.or(expr_stmt);
+        let stmt = let_stmt.or(set_stmt).or(expr_stmt);
         let block = just(TokenKind::LeftBrace)
             .ignore_then(
                 stmt.clone()
