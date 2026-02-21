@@ -57,6 +57,8 @@ pub enum TokenKind {
     Bang,
     #[token("&")]
     Ampersand,
+    #[token("*")]
+    Star,
     #[token("yield")]
     Yield,
 }

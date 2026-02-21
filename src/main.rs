@@ -24,16 +24,18 @@ fn main() {
         struct SpiConfig {
             baud_rate: Int
             clock_speed: Int
-        }
 
-        struct Main {
-            func main(): Int = {
-                let config = SpiConfig(100, 1000);
+            func prj_baud(cfg: Ptr[SpiConfig]): Ptr[Int] = &cfg*.baud_rate
+
+            func my_config(): SpiConfig = {
+                let config = SpiConfig(0, 0);
                 set config.baud_rate = 10;
-                config.baud_rate
+                set config.clock_speed = 50;
+                config
             }
         }
     "#;
+    // func prj_baud_rate(cfg: Ptr[SpiConfig]): Ptr[Int] = &cfg*.baud_rate
 
     let tokens = scan_program(source).unwrap();
     let mut ast = parse_program(source, &tokens).unwrap();

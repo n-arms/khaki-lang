@@ -194,6 +194,7 @@ fn strukt<'a, I: Input<'a, Token = TokenKind, Span = SimpleSpan>>(
         enum Modif {
             Call(Vec<Expr>, Span),
             Await(Span),
+            Deref(Span),
             Field(String, Span),
         }
 
@@ -201,10 +202,11 @@ fn strukt<'a, I: Input<'a, Token = TokenKind, Span = SimpleSpan>>(
             .delimited_by(just(TokenKind::LeftParen), just(TokenKind::RightParen))
             .map_with(|args, e| Modif::Call(args, get_span(e)));
         let await_modif = just(TokenKind::Bang).map_with(|_, e| Modif::Await(get_span(e)));
+        let deref_modif = just(TokenKind::Star).map_with(|_, e| Modif::Deref(get_span(e)));
         let field_modif = just(TokenKind::Dot)
             .ignore_then(name(input))
             .map_with(|name, e| Modif::Field(name, get_span(e)));
-        let modif = call_modif.or(await_modif).or(field_modif);
+        let modif = call_modif.or(await_modif).or(deref_modif).or(field_modif);
 
         base.then(modif.repeated().collect::<Vec<_>>())
             .map_with(|(mut expr, modifs), e| {
@@ -212,6 +214,7 @@ fn strukt<'a, I: Input<'a, Token = TokenKind, Span = SimpleSpan>>(
                     expr = match modif {
                         Modif::Call(args, span) => Expr::Call(Box::new(expr), args, None, span),
                         Modif::Await(span) => Expr::Op(Op::Await, vec![expr], None, span),
+                        Modif::Deref(span) => Expr::Op(Op::Deref, vec![expr], None, span),
                         Modif::Field(field_name, span) => {
                             Expr::Field(Box::new(expr), field_name, None, span)
                         }

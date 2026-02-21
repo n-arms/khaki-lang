@@ -70,6 +70,13 @@ pub fn infer_expr(
                 }
                 Op::Deref => {
                     let result = local.fresh(*span);
+                    let arg_type = args[0].get_type();
+                    if let TypeKind::Named(name) = &arg_type.kind {
+                        if name == "Ptr" {
+                            *typ = Some(arg_type.children[0].clone());
+                            return Ok(());
+                        }
+                    }
                     local.unify(args[0].get_type(), Type::ptr(result.clone(), *span), *span);
                     result
                 }
@@ -124,6 +131,7 @@ pub fn infer_expr(
                     }
                     Stmt::Set(lval, expr) => {
                         infer_expr(lval, global, local, &inner)?;
+                        ensure_lvalue(lval, *span)?;
                         infer_expr(expr, global, local, &inner)?;
                         let expr_type = expr.get_type();
                         let span = expr_type.span;
@@ -159,7 +167,7 @@ pub fn infer_expr(
                     *span,
                 );
             } else if let Some(func) = strukt.funcs.get(field_name) {
-                todo!()
+                unreachable!()
             } else {
                 return Err(Error::UnknownName(field_name.clone(), *span));
             }
@@ -171,9 +179,7 @@ pub fn infer_expr(
 
 fn ensure_lvalue(lvalue: &Expr, set_span: Span) -> Result<(), Error> {
     match lvalue {
-        Expr::Field(inner, ..) => {
-            ensure_lvalue(inner, set_span)?;
-        }
+        Expr::Op(Op::Get(_), args, ..) => ensure_lvalue(&args[0], set_span)?,
         Expr::Var(..) | Expr::Op(Op::Deref, _, ..) => {}
         _ => return Err(Error::BadLValue(lvalue.clone(), set_span)),
     }
