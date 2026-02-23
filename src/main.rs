@@ -21,19 +21,14 @@ mod typing;
 
 fn main() {
     let source = r#"
-        struct SpiConfig {
-            baud_rate: Int
-            clock_speed: Int
-
-            func prj_baud(cfg: Ptr[SpiConfig]): Ptr[Int] = &cfg*.baud_rate
-
-            func my_config(): SpiConfig = {
-                let config = SpiConfig(0, 0);
-                set config.baud_rate = 10;
-                set config.clock_speed = 50;
-                config
-            }
+    struct Main {
+        cor foo(x: Int): Int = {
+            let a = x;
+            yield;
+            set a = 5;
+            a
         }
+    }
     "#;
     // func prj_baud_rate(cfg: Ptr[SpiConfig]): Ptr[Int] = &cfg*.baud_rate
 

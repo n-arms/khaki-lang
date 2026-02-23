@@ -8,21 +8,30 @@ use std::{
     iter,
 };
 
+use chumsky::container::Seq;
+
 use crate::{
     ast::{Type, TypeKind, cor_name},
     emit::{
-        block_name, emit_instr, emit_slot_setup, emit_type, load_slot, resolve_func, slot_name,
-        store_slot, str_list,
+        block_name, emit_instr, emit_type, load_slot, resolve_func, slot_name, store_slot,
+        str_list,
         text::{LlvmVals, Text},
     },
-    ir::{BlockId, End, Func, Slot},
+    ir::{BlockId, End, Func, Slot, Value},
     typing::Spec,
 };
 
 // calculate all the slots that need to be saved / restored over await points
 // we don't do fine-grained tracking of which slot needs to be saved over which gap
-fn saved_slots(func: &Func) -> Vec<Slot> {
+
+struct CorSlots {
+    saved_slots: Vec<Slot>,
+    temp_slots: Vec<Slot>,
+}
+
+fn saved_slots(func: &Func) -> CorSlots {
     let mut saved = func.args.clone();
+    let mut all = HashSet::new();
     for block in func.blocks.values() {
         let mut defined: HashSet<Slot> = HashSet::new();
         for instr in &block.instrs {
@@ -32,10 +41,28 @@ fn saved_slots(func: &Func) -> Vec<Slot> {
                 }
             }
             defined.insert(instr.result.clone());
+            all.insert(&instr.result);
+
+            if let Value::Ref = instr.value {
+                if !saved.contains(&instr.args[0]) {
+                    saved.push(instr.args[0].clone());
+                }
+            }
         }
+        all.extend(block.end.result_slots());
     }
 
-    saved
+    let mut temp_slots = Vec::new();
+
+    for slot in all {
+        if !saved.contains(slot) {
+            temp_slots.push(slot.clone());
+        }
+    }
+    CorSlots {
+        saved_slots: saved,
+        temp_slots,
+    }
 }
 
 // each basic block which ends in an `End::Yield` or `End::Await` gets a state number
@@ -68,7 +95,7 @@ fn cor_struct_name(struct_spec: &Spec, func: &Func) -> String {
 }
 
 pub fn emit_cor_struct(struct_spec: &Spec, func: &Func, text: &mut Text) {
-    let slots = saved_slots(func);
+    let slots = saved_slots(func).saved_slots;
     let struct_name = cor_struct_name(struct_spec, func);
     let fields = iter::once("i32".into()).chain(slots.iter().map(|slot| emit_type(&slot.1)));
     text.pushln(format!("{struct_name} = type {{ {} }}", str_list(fields)))
@@ -113,6 +140,24 @@ pub fn emit_constructor(struct_spec: &Spec, func: &Func, text: &mut Text) {
     text.pushln("}");
 }
 
+fn emit_slot_setup(slots: &CorSlots, cor_struct: &str, text: &mut Text) {
+    for slot in &slots.temp_slots {
+        text.pushln(format!(
+            "{} = alloca {}",
+            slot_name(&slot),
+            emit_type(&slot.1)
+        ))
+    }
+
+    for (i, slot) in slots.saved_slots.iter().enumerate() {
+        let name = slot_name(slot);
+        text.pushln(format!(
+            "{name} = getelementptr {cor_struct}, {cor_struct}* %cor, i32 0, i32 {}",
+            i + 1
+        ))
+    }
+}
+
 pub fn emit_poll(struct_spec: &Spec, func: &Func, text: &mut Text) {
     let cor_spec = Spec {
         struct_name: cor_name(&struct_spec.struct_name, &func.name),
@@ -127,27 +172,10 @@ pub fn emit_poll(struct_spec: &Spec, func: &Func, text: &mut Text) {
     text.pushln("entry:");
     text.inc();
 
-    emit_slot_setup(func, text);
-    let saved_slots = saved_slots(func);
+    let slots = saved_slots(func);
+    emit_slot_setup(&slots, &cor_struct, text);
 
     let mut vals = LlvmVals::default();
-
-    let mut field_ptrs = Vec::new();
-
-    for (i, slot) in saved_slots.iter().enumerate() {
-        let field_ptr = vals.fresh();
-        text.pushln(format!(
-            "{field_ptr} = getelementptr {cor_struct}, {cor_struct}* %cor, i32 0, i32 {}",
-            i + 1
-        ));
-        let field = vals.fresh();
-        let field_type = emit_type(&slot.1);
-        text.pushln(format!(
-            "{field} = load {field_type}, {field_type}* {field_ptr}"
-        ));
-        field_ptrs.push((field_ptr, slot));
-        store_slot(slot, field, text);
-    }
 
     let state_ptr = vals.fresh();
     text.pushln(format!(
@@ -178,35 +206,17 @@ pub fn emit_poll(struct_spec: &Spec, func: &Func, text: &mut Text) {
         for instr in &block.instrs {
             emit_instr(instr, text, &mut vals);
         }
-        emit_cor_end(
-            &block.end,
-            &id_to_state,
-            &state_ptr,
-            &field_ptrs,
-            text,
-            &mut vals,
-        );
+        emit_cor_end(&block.end, &id_to_state, &state_ptr, text, &mut vals);
         text.dec();
     }
 
     text.pushln("}");
 }
 
-fn save_saved_slots(field_ptrs: &[(String, &Slot)], text: &mut Text, vals: &mut LlvmVals) {
-    for (ptr_val, slot) in field_ptrs {
-        let slot_val = load_slot(slot, text, vals);
-        let slot_type = emit_type(&slot.1);
-        text.pushln(format!(
-            "store {slot_type} {slot_val}, {slot_type}* {ptr_val}"
-        ));
-    }
-}
-
 fn emit_cor_end(
     end: &End,
     id_to_state: &HashMap<BlockId, usize>,
     state_ptr: &str,
-    field_ptrs: &[(String, &Slot)],
     text: &mut Text,
     vals: &mut LlvmVals,
 ) {
@@ -263,13 +273,11 @@ fn emit_cor_end(
             text.dec();
             text.pushln(format!("{yield_label}:"));
             text.inc();
-            save_saved_slots(field_ptrs, text, vals);
             text.pushln("ret i8 0");
         }
         End::Yield(block_id, span) => {
             let state = id_to_state[block_id];
             text.pushln(format!("store i32 {state}, i32* {state_ptr}"));
-            save_saved_slots(field_ptrs, text, vals);
             text.pushln(format!("ret i8 0"));
         }
         End::Return(slot, span) => {
