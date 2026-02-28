@@ -95,7 +95,11 @@ fn strukt<'a, I: Input<'a, Token = TokenKind, Span = SimpleSpan>>(
             });
         let generic =
             name(input).map_with(|name, e| Type::base(TypeKind::Generic(name), get_span(e)));
-        generic.or(named)
+        let slice = just(TokenKind::LeftSquare)
+            .ignore_then(just(TokenKind::RightSquare))
+            .ignore_then(typ.clone())
+            .map_with(|elem, e| Type::slice(elem, get_span(e)));
+        generic.or(named).or(slice)
     });
 
     let expr = recursive(|expr| {
@@ -124,6 +128,23 @@ fn strukt<'a, I: Input<'a, Token = TokenKind, Span = SimpleSpan>>(
                     Expr::Func(struct_name, constructor, None, get_span(e))
                 }
             });
+
+        let array_literal = just(TokenKind::LeftSquare)
+            .ignore_then(num(input).or_not())
+            .then_ignore(just(TokenKind::RightSquare))
+            .then(
+                list(expr.clone())
+                    .delimited_by(just(TokenKind::LeftBrace), just(TokenKind::RightBrace)),
+            )
+            .map_with(|(size, elems), e| {
+                if let Some(size) = size {
+                    let elems = if elems.is_empty() { None } else { Some(elems) };
+                    Expr::Array(size.parse().unwrap(), elems, None, get_span(e))
+                } else {
+                    Expr::Array(elems.len(), Some(elems), None, get_span(e))
+                }
+            });
+
         let let_stmt = just(TokenKind::Let)
             .ignore_then(name(input))
             .then_ignore(just(TokenKind::Equals))
@@ -189,13 +210,15 @@ fn strukt<'a, I: Input<'a, Token = TokenKind, Span = SimpleSpan>>(
             .or(_yield)
             .or(_ref)
             .or(_if)
-            .or(_while);
+            .or(_while)
+            .or(array_literal);
 
         enum Modif {
             Call(Vec<Expr>, Span),
             Await(Span),
             Deref(Span),
             Field(String, Span),
+            Index(Expr, Span),
         }
 
         let call_modif = list(expr.clone())
@@ -206,7 +229,15 @@ fn strukt<'a, I: Input<'a, Token = TokenKind, Span = SimpleSpan>>(
         let field_modif = just(TokenKind::Dot)
             .ignore_then(name(input))
             .map_with(|name, e| Modif::Field(name, get_span(e)));
-        let modif = call_modif.or(await_modif).or(deref_modif).or(field_modif);
+        let index_modif = expr
+            .clone()
+            .delimited_by(just(TokenKind::LeftSquare), just(TokenKind::RightSquare))
+            .map_with(|index, e| Modif::Index(index, get_span(e)));
+        let modif = call_modif
+            .or(await_modif)
+            .or(deref_modif)
+            .or(field_modif)
+            .or(index_modif);
 
         base.then(modif.repeated().collect::<Vec<_>>())
             .map_with(|(mut expr, modifs), e| {
@@ -217,6 +248,9 @@ fn strukt<'a, I: Input<'a, Token = TokenKind, Span = SimpleSpan>>(
                         Modif::Deref(span) => Expr::Op(Op::Deref, vec![expr], None, span),
                         Modif::Field(field_name, span) => {
                             Expr::Field(Box::new(expr), field_name, None, span)
+                        }
+                        Modif::Index(index, span) => {
+                            Expr::Op(Op::SliceIndex, vec![expr, index], None, span)
                         }
                     };
                 }

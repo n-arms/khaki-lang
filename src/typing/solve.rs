@@ -42,7 +42,9 @@ impl Rule {
                 sub.typ(cor_type);
                 sub.typ(await_type);
                 let cor_name = match &cor_type.kind {
-                    TypeKind::Func => return Err(Error::BadAwait(cor_type.clone(), *span)),
+                    TypeKind::Func | TypeKind::Array(..) => {
+                        return Err(Error::BadAwait(cor_type.clone(), *span));
+                    }
                     TypeKind::Named(name) => name,
                     TypeKind::Unif(_) => return Ok(false),
                     TypeKind::Generic(g) => unreachable!("Unbound generic unif{g}"),

@@ -51,8 +51,13 @@ pub enum Value {
     Op(Op),
     Call,
     Ref,
+    // Given a pointer to a struct, make a pointer to the field
     FieldRef(usize),
     PackStruct(Spec),
+    Array(usize),
+    RefArray,
+    // Given a pointer, make a pointer that has indexed by the given amount
+    IndexRef,
 }
 
 #[derive(Clone, Debug)]

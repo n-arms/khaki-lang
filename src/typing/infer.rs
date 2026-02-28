@@ -77,7 +77,7 @@ pub fn infer_expr(
                             return Ok(());
                         }
                     }
-                    local.unify(args[0].get_type(), Type::ptr(result.clone(), *span), *span);
+                    local.unify(arg_type, Type::ptr(result.clone(), *span), *span);
                     result
                 }
                 Op::If => {
@@ -91,6 +91,19 @@ pub fn infer_expr(
                 }
                 Op::Constructor(..) => local.fresh(*span),
                 Op::Get(_) => unreachable!(),
+                Op::SliceIndex => {
+                    let result = local.fresh(*span);
+                    let arg_type = args[0].get_type();
+                    local.unify(args[1].get_type(), Type::int(*span), *span);
+                    if let TypeKind::Named(name) = &arg_type.kind {
+                        if name == "Slice" {
+                            *typ = Some(arg_type.children[0].clone());
+                            return Ok(());
+                        }
+                    }
+                    local.unify(arg_type, Type::slice(result.clone(), *span), *span);
+                    result
+                }
             });
         }
         Expr::Call(func, args, meta, span) => {
@@ -170,6 +183,27 @@ pub fn infer_expr(
                 unreachable!()
             } else {
                 return Err(Error::UnknownName(field_name.clone(), *span));
+            }
+        }
+        Expr::Array(size, elems, elem_type, span) => {
+            if let Some(elems) = elems {
+                if *size != elems.len() {
+                    return Err(Error::BadArraySize(*size, *span));
+                }
+                for elem in elems.iter_mut() {
+                    infer_expr(elem, global, local, scope)?;
+                }
+                for pair in elems.windows(2) {
+                    let [a, b]: &[Expr; _] = pair.try_into().unwrap();
+                    local.unify(a.get_type(), b.get_type(), *span);
+                }
+                if let Some(first) = elems.first() {
+                    *elem_type = Some(first.get_type());
+                } else {
+                    *elem_type = Some(local.fresh(*span));
+                }
+            } else {
+                *elem_type = Some(local.fresh(*span));
             }
         }
     }

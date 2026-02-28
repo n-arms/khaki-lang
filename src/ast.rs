@@ -82,6 +82,7 @@ impl fmt::Debug for Type {
             }
             TypeKind::Unif(u) => write!(f, "unif{u}"),
             TypeKind::Generic(name) => write!(f, "{name}"),
+            TypeKind::Array(size) => write!(f, "[{:?} x {size}]", self.children[0]),
         }
     }
 }
@@ -125,6 +126,10 @@ impl Type {
         Self::named("Ptr".into(), vec![typ], span)
     }
 
+    pub fn slice(typ: Type, span: Span) -> Self {
+        Self::named("Slice".into(), vec![typ], span)
+    }
+
     pub fn func(args: Vec<Type>, result: Type, span: Span) -> Type {
         let mut children = args;
         children.push(result);
@@ -152,12 +157,13 @@ impl Type {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum TypeKind {
     Func,
     Named(String),
     Unif(usize),
     Generic(String),
+    Array(usize),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -171,6 +177,7 @@ pub enum Op {
     While,
     Get(usize),
     Constructor(String),
+    SliceIndex,
 }
 
 #[derive(Clone, Debug)]
@@ -183,6 +190,7 @@ pub enum Expr {
     Call(Box<Expr>, Vec<Expr>, Option<Type>, Span),
     Block(Vec<Stmt>, Option<Box<Expr>>, Span),
     Field(Box<Expr>, String, Option<Type>, Span),
+    Array(usize, Option<Vec<Expr>>, Option<Type>, Span),
 }
 
 #[derive(Clone, Debug)]
@@ -208,6 +216,7 @@ impl Expr {
                     return Type::unit(*span);
                 }
             }
+            Expr::Array(_, _, elem_type, span) => Type::slice(elem_type.clone().unwrap(), *span),
         }
     }
 }

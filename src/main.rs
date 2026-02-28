@@ -22,12 +22,8 @@ mod typing;
 fn main() {
     let source = r#"
     struct Main {
-        cor foo(x: Int): Int = {
-            let a = x;
-            yield;
-            set a = 5;
-            a
-        }
+        func first(s: []Int): Int = s[1]
+        func main(): Int = Main.first([] {3, 4})
     }
     "#;
     // func prj_baud_rate(cfg: Ptr[SpiConfig]): Ptr[Int] = &cfg*.baud_rate
@@ -107,6 +103,18 @@ fn main() {
         span,
         generics: Vec::new(),
         fields: OrdMap::new(),
+        funcs: HashMap::new(),
+    });
+    ast.push(Struct {
+        name: "Slice".into(),
+        span,
+        generics: vec!["t".into()],
+        fields: [
+            ("ptr".into(), Type::ptr(Type::generic("t", span), span)),
+            ("length".into(), Type::int(span)),
+        ]
+        .into_iter()
+        .collect(),
         funcs: HashMap::new(),
     });
     let bool_type = Type::bool(span);

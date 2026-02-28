@@ -66,6 +66,9 @@ fn type_name(typ: &Type) -> String {
                 format!("{name}[{}]", str_list(typ.children.iter().map(type_name)))
             }
         }
+        TypeKind::Array(size) => {
+            format!("[{size} x {}]", emit_type(&typ.children[0]))
+        }
         TypeKind::Generic(_) | TypeKind::Unif(_) => unreachable!(),
     }
 }
@@ -398,8 +401,8 @@ fn emit_instr(instr: &Instr, text: &mut Text, vals: &mut LlvmVals) {
             assert_eq!(ptr, "Ptr");
             let container_type = emit_type(&instr.args[0].1.children[0]);
             text.pushln(format!(
-                    "{field_ptr} = getelementptr {container_type}, {container_type}* {container_ptr}, i32 0, i32 {index}"
-                ));
+                            "{field_ptr} = getelementptr {container_type}, {container_type}* {container_ptr}, i32 0, i32 {index}"
+                        ));
             store_result(field_ptr, text);
         }
         Value::PackStruct(spec) => {
@@ -408,13 +411,51 @@ fn emit_instr(instr: &Instr, text: &mut Text, vals: &mut LlvmVals) {
                 let arg_slot = load_slot(arg, text, vals);
                 let field_ptr = vals.fresh();
                 text.pushln(format!(
-                    "{field_ptr} = getelementptr {result_type}, {result_type}* {struct_slot}, i32 0, i32 {i}"
-                ));
+                            "{field_ptr} = getelementptr {result_type}, {result_type}* {struct_slot}, i32 0, i32 {i}"
+                        ));
                 let arg_type = emit_type(&arg.1);
                 text.pushln(format!(
                     "store {arg_type} {arg_slot}, {arg_type}* {field_ptr}"
                 ));
             }
+        }
+        Value::Array(..) => {
+            let array_slot = slot_name(&instr.result);
+            for (i, arg) in instr.args.iter().enumerate() {
+                let arg_slot = load_slot(arg, text, vals);
+                let field_ptr = vals.fresh();
+                text.pushln(format!(
+                            "{field_ptr} = getelementptr {result_type}, {result_type}* {array_slot}, i32 0, i32 {i}"
+                        ));
+                let arg_type = emit_type(&arg.1);
+                text.pushln(format!(
+                    "store {arg_type} {arg_slot}, {arg_type}* {field_ptr}"
+                ));
+            }
+        }
+        Value::RefArray => {
+            let array_slot = slot_name(&instr.args[0]);
+            let array_ptr = vals.fresh();
+            assert_eq!(instr.result.1.kind, TypeKind::Named("Ptr".into()));
+            let array_type = emit_type(&instr.args[0].1);
+            text.pushln(format!(
+                "{array_ptr} = getelementptr {array_type}, {array_type}* {array_slot}, i32 0, i32 0"
+            ));
+            store_result(array_ptr, text);
+        }
+        Value::IndexRef => {
+            let array_ptr = load_slot(&instr.args[0], text, vals);
+            let index = load_slot(&instr.args[1], text, vals);
+            let elem_ptr = vals.fresh();
+            let TypeKind::Named(ptr) = &instr.args[0].1.kind else {
+                unreachable!()
+            };
+            assert_eq!(ptr, "Ptr");
+            let elem_type = emit_type(&instr.args[0].1.children[0]);
+            text.pushln(format!(
+                "{elem_ptr} = getelementptr {elem_type}, {elem_type}* {array_ptr}, i32 {index}"
+            ));
+            store_result(elem_ptr, text);
         }
     }
 }

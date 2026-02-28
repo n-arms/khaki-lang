@@ -54,6 +54,7 @@ impl Sub {
             TypeKind::Named(_) => {}
             TypeKind::Unif(unif) => *typ = self.unif(*unif, typ.span),
             TypeKind::Generic(name) => *typ = self.generic(name, typ.span),
+            TypeKind::Array(_) => {}
         }
     }
 
@@ -100,6 +101,14 @@ impl Sub {
                 }
             }
             Expr::Field(expr, _, _, span) => todo!(),
+            Expr::Array(size, elems, elem_type, span) => {
+                for elem in elems.iter_mut().flatten() {
+                    self.expr(elem);
+                }
+                if let Some(typ) = elem_type {
+                    self.typ(typ);
+                }
+            }
         }
     }
 

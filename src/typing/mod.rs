@@ -29,6 +29,7 @@ pub enum Error {
     BadAwait(Type, Span),
     NeedsTypeAnnotation(Box<Expr>, Span),
     BadLValue(Expr, Span),
+    BadArraySize(usize, Span),
 }
 
 pub fn type_program(program: &[Struct]) -> Result<HashMap<Spec, Struct>, Error> {

@@ -224,6 +224,38 @@ fn lower_expr(expr: &ast::Expr, fb: &mut FuncBuilder, env: &Env) -> ir::Slot {
                     arg_vals,
                     *span,
                 ),
+                ast::Op::SliceIndex => {
+                    let slice_ptr = fb.instr(
+                        Type::ptr(arg_vals[0].1.clone(), *span),
+                        ir::Value::Ref,
+                        vec![arg_vals[0].clone()],
+                        *span,
+                    );
+                    let backing_ptr_ref = fb.instr(
+                        Type::ptr(Type::ptr(result.clone(), *span), *span),
+                        ir::Value::FieldRef(0),
+                        vec![slice_ptr],
+                        *span,
+                    );
+                    let backing_ptr = fb.instr(
+                        Type::ptr(result.clone(), *span),
+                        ir::Value::Op(ir::Op::Builtin("ptr_get".into())),
+                        vec![backing_ptr_ref],
+                        *span,
+                    );
+                    let elem_ptr = fb.instr(
+                        Type::ptr(result.clone(), *span),
+                        ir::Value::IndexRef,
+                        vec![backing_ptr, arg_vals[1].clone()],
+                        *span,
+                    );
+                    fb.instr(
+                        result,
+                        ir::Value::Op(ir::Op::Builtin("ptr_get".into())),
+                        vec![elem_ptr],
+                        *span,
+                    )
+                }
                 ast::Op::If | ast::Op::While | ast::Op::Ref => unreachable!(),
             }
         }
@@ -271,6 +303,47 @@ fn lower_expr(expr: &ast::Expr, fb: &mut FuncBuilder, env: &Env) -> ir::Slot {
             }
         }
         ast::Expr::Field(..) => unreachable!(),
+        ast::Expr::Array(size, elems, elem_type, span) => {
+            let elem_slots = elems
+                .iter()
+                .flatten()
+                .map(|elem| lower_expr(elem, fb, env))
+                .collect();
+            let elem_type = elem_type.clone().unwrap();
+            let array = fb.instr(
+                Type {
+                    kind: TypeKind::Array(*size),
+                    span: *span,
+                    children: vec![elem_type.clone()],
+                },
+                ir::Value::Array(*size),
+                elem_slots,
+                *span,
+            );
+            let array_ptr = fb.instr(
+                Type::ptr(elem_type.clone(), *span),
+                ir::Value::RefArray,
+                vec![array],
+                *span,
+            );
+            let array_size = fb.instr(
+                Type::int(*span),
+                ir::Value::Literal(ast::Literal::Number(size.to_string(), *span)),
+                vec![],
+                *span,
+            );
+            let slice_spec = Spec {
+                struct_name: "Slice".into(),
+                generics: vec![elem_type.clone()],
+            };
+            let slice = fb.instr(
+                Type::slice(elem_type.clone(), *span),
+                ir::Value::PackStruct(slice_spec),
+                vec![array_ptr, array_size],
+                *span,
+            );
+            slice
+        }
     }
 }
 
@@ -301,6 +374,7 @@ fn lower_lvalue_ref(expr: &ast::Expr, fb: &mut FuncBuilder, env: &Env) -> ir::Sl
         | ast::Expr::Op(..)
         | ast::Expr::Literal(..)
         | ast::Expr::Call(..)
+        | ast::Expr::Array(..)
         | ast::Expr::Block(..) => unreachable!(),
     }
 }

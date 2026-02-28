@@ -59,6 +59,17 @@ fn spec_expr(expr: &Expr, specs: &mut HashSet<Spec>) {
                 spec_expr(result, specs);
             }
         }
+        Expr::Array(_, elems, elem_type, _) => {
+            for elem in elems.iter().flatten() {
+                spec_expr(elem, specs);
+            }
+            let elem_type = elem_type.as_ref().unwrap();
+            spec_type(elem_type, specs);
+            specs.insert(Spec {
+                struct_name: "Slice".into(),
+                generics: vec![elem_type.clone()],
+            });
+        }
     }
 }
 
@@ -76,5 +87,6 @@ fn spec_type(typ: &Type, specs: &mut HashSet<Spec>) {
                 generics: typ.children.clone(),
             });
         }
+        TypeKind::Array(_) => {}
     }
 }
