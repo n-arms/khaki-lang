@@ -177,6 +177,7 @@ pub enum Op {
     While,
     Get(usize),
     Constructor(String),
+    // Slice[t], Int, t
     SliceIndex,
 }
 

@@ -132,16 +132,17 @@ fn strukt<'a, I: Input<'a, Token = TokenKind, Span = SimpleSpan>>(
         let array_literal = just(TokenKind::LeftSquare)
             .ignore_then(num(input).or_not())
             .then_ignore(just(TokenKind::RightSquare))
+            .then(typ.clone().or_not())
             .then(
                 list(expr.clone())
                     .delimited_by(just(TokenKind::LeftBrace), just(TokenKind::RightBrace)),
             )
-            .map_with(|(size, elems), e| {
+            .map_with(|((size, typ), elems), e| {
                 if let Some(size) = size {
                     let elems = if elems.is_empty() { None } else { Some(elems) };
-                    Expr::Array(size.parse().unwrap(), elems, None, get_span(e))
+                    Expr::Array(size.parse().unwrap(), elems, typ, get_span(e))
                 } else {
-                    Expr::Array(elems.len(), Some(elems), None, get_span(e))
+                    Expr::Array(elems.len(), Some(elems), typ, get_span(e))
                 }
             });
 

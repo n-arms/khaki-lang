@@ -21,12 +21,26 @@ mod typing;
 
 fn main() {
     let source = r#"
+    struct Vec[t] {
+        elems: []t
+        length: Int
+
+        func new(buf: []t): Vec[t] = Vec(buf, 0)
+        func get(vec: Vec[t], index: Int): t = vec.elems[index]
+        func push(vec: Ptr[Vec[t]], elem: t): Unit = {
+            set vec*.elems[vec*.length] = elem;
+            set vec*.length = Int.add(vec*.length, 1);
+        }
+    }
+
     struct Main {
-        func first(s: []Int): Int = s[1]
-        func main(): Int = Main.first([] {3, 4})
+        func main(): Int = {
+            let buf = [10]Int {};
+            let vec = Vec.new(buf);
+            5
+        }
     }
     "#;
-    // func prj_baud_rate(cfg: Ptr[SpiConfig]): Ptr[Int] = &cfg*.baud_rate
 
     let tokens = scan_program(source).unwrap();
     let mut ast = parse_program(source, &tokens).unwrap();

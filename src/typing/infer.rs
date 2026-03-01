@@ -197,13 +197,21 @@ pub fn infer_expr(
                     let [a, b]: &[Expr; _] = pair.try_into().unwrap();
                     local.unify(a.get_type(), b.get_type(), *span);
                 }
-                if let Some(first) = elems.first() {
-                    *elem_type = Some(first.get_type());
+                if let Some(elem_type) = elem_type {
+                    if let Some(first) = elems.first() {
+                        local.unify(elem_type.clone(), first.get_type(), *span);
+                    }
                 } else {
-                    *elem_type = Some(local.fresh(*span));
+                    if let Some(first) = elems.first() {
+                        *elem_type = Some(first.get_type());
+                    } else {
+                        *elem_type = Some(local.fresh(*span));
+                    }
                 }
             } else {
-                *elem_type = Some(local.fresh(*span));
+                if elem_type.is_none() {
+                    *elem_type = Some(local.fresh(*span));
+                }
             }
         }
     }
@@ -214,7 +222,7 @@ pub fn infer_expr(
 fn ensure_lvalue(lvalue: &Expr, set_span: Span) -> Result<(), Error> {
     match lvalue {
         Expr::Op(Op::Get(_), args, ..) => ensure_lvalue(&args[0], set_span)?,
-        Expr::Var(..) | Expr::Op(Op::Deref, _, ..) => {}
+        Expr::Var(..) | Expr::Op(Op::Deref | Op::SliceIndex, ..) => {}
         _ => return Err(Error::BadLValue(lvalue.clone(), set_span)),
     }
     Ok(())

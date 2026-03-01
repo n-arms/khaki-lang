@@ -351,7 +351,7 @@ fn lower_expr(expr: &ast::Expr, fb: &mut FuncBuilder, env: &Env) -> ir::Slot {
 fn lower_lvalue_ref(expr: &ast::Expr, fb: &mut FuncBuilder, env: &Env) -> ir::Slot {
     let lvalue_type = expr.get_type();
     let span = lvalue_type.span;
-    let result = Type::ptr(lvalue_type, span);
+    let result = Type::ptr(lvalue_type.clone(), span);
     match expr {
         ast::Expr::Var(name, _, span) => fb.instr(
             result,
@@ -368,6 +368,30 @@ fn lower_lvalue_ref(expr: &ast::Expr, fb: &mut FuncBuilder, env: &Env) -> ir::Sl
                 vec![container_ptr],
                 *span,
             )
+        }
+        ast::Expr::Op(ast::Op::SliceIndex, args, _, span) => {
+            let slice = lower_expr(&args[0], fb, env);
+            let index = lower_expr(&args[1], fb, env);
+            let span = *span;
+            let slice_ptr = fb.instr(
+                Type::ptr(Type::slice(lvalue_type.clone(), span), span),
+                ir::Value::Ref,
+                vec![slice],
+                span,
+            );
+            let backing_ptr_ptr = fb.instr(
+                Type::ptr(Type::ptr(lvalue_type.clone(), span), span),
+                ir::Value::FieldRef(0),
+                vec![slice_ptr],
+                span,
+            );
+            let backing_ptr = fb.instr(
+                Type::ptr(lvalue_type.clone(), span),
+                ir::Value::Op(ir::Op::Builtin("ptr_get".into())),
+                vec![backing_ptr_ptr],
+                span,
+            );
+            fb.instr(result, ir::Value::IndexRef, vec![backing_ptr, index], span)
         }
         ast::Expr::Func(..)
         | ast::Expr::Field(..)
