@@ -89,6 +89,47 @@ impl fmt::Debug for Type {
 
 impl Eq for Type {}
 
+pub struct IntType {
+    width: usize,
+    signed: bool,
+}
+
+impl IntType {
+    pub fn signed(width: usize) -> Self {
+        Self {
+            width,
+            signed: true,
+        }
+    }
+    pub fn unsigned(width: usize) -> Self {
+        Self {
+            width,
+            signed: false,
+        }
+    }
+    pub fn to_type(&self, span: Span) -> Type {
+        Type::named(
+            format!("{}{}", if self.signed { "I" } else { "U" }, self.width),
+            vec![],
+            span,
+        )
+    }
+
+    pub fn from_type(typ: &Type) -> Option<Self> {
+        let TypeKind::Named(name) = &typ.kind else {
+            return None;
+        };
+        let first = name.chars().next()?;
+        let signed = match first {
+            'I' => true,
+            'U' => false,
+            _ => return None,
+        };
+        let width = name[1..].parse().ok()?;
+        Some(Self { width, signed })
+    }
+}
+
 impl Type {
     pub fn bool(span: Span) -> Type {
         Type {
@@ -109,14 +150,6 @@ impl Type {
     pub fn generic(name: impl Into<String>, span: Span) -> Self {
         Self {
             kind: TypeKind::Generic(name.into()),
-            span,
-            children: Vec::new(),
-        }
-    }
-
-    pub fn int(span: Span) -> Type {
-        Type {
-            kind: TypeKind::Named("Int".into()),
             span,
             children: Vec::new(),
         }
