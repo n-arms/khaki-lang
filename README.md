@@ -15,12 +15,12 @@ The Khaki compiler is based on a modern compiler architecture:
 ## Examples
 ```
 struct Main {
-  cor range(up_to: Int, out: Ptr[Int]): Unit {
+  cor range(up_to: I32, out: Ptr[I32]): Unit {
     let i = 0;
     while i < up_to {
-      Ptr.store(out, i);
+      set out* = i;
       yield;
-      set i = 1.add(i);
+      set i = i + 1;
     }
   }
 
@@ -29,7 +29,7 @@ struct Main {
     let r = range(10, &i);
     let result = {};
     while (Main_range.poll(&r, &result)) {
-      Int.print(i);
+      i.print()
     }
   }
 }
