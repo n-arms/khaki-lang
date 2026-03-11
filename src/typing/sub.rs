@@ -60,9 +60,14 @@ impl Sub {
 
     fn expr(&self, expr: &mut Expr) {
         match expr {
-            Expr::Literal(_, typ) | Expr::Var(_, typ, _) | Expr::Field(_, _, typ, _) => {
+            Expr::Literal(_, typ) | Expr::Var(_, typ, _) => {
                 if let Some(typ) = typ {
                     self.typ(typ)
+                }
+            }
+            Expr::Field(_, _, meta, _) => {
+                if let Some((typ, _)) = meta.as_mut() {
+                    self.typ(typ);
                 }
             }
             Expr::Func(_, _, meta, _) => {
@@ -100,7 +105,15 @@ impl Sub {
                     self.expr(result);
                 }
             }
-            Expr::Field(expr, _, _, span) => todo!(),
+            Expr::MethodCall(expr, _, args, typ, _) => {
+                self.expr(expr);
+                for arg in args {
+                    self.expr(arg);
+                }
+                if let Some(typ) = typ {
+                    self.typ(typ)
+                }
+            }
             Expr::Array(size, elems, elem_type, span) => {
                 for elem in elems.iter_mut().flatten() {
                     self.expr(elem);

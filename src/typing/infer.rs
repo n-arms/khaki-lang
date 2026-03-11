@@ -1,5 +1,5 @@
 use crate::{
-    ast::{Expr, Literal, Op, Span, Stmt, Type, TypeKind, cor_name},
+    ast::{Expr, IntType, Literal, Op, Span, Stmt, Type, TypeKind, cor_name},
     typing::{
         Error,
         env::{Global, Local, Scope},
@@ -14,11 +14,6 @@ pub fn infer_expr(
     scope: &Scope,
 ) -> Result<(), Error> {
     println!("infer {expr:?}");
-    if matches!(expr, Expr::Call(..)) {
-        if try_dot_call(expr, global, local, scope)? {
-            return Ok(());
-        };
-    }
     match expr {
         Expr::Var(name, typ, span) => {
             *typ = Some(scope.get_var(name, *span)?.clone());
@@ -41,7 +36,11 @@ pub fn infer_expr(
         }
         Expr::Literal(literal, typ) => match literal {
             Literal::Bool(_, span) => *typ = Some(Type::bool(*span)),
-            Literal::Number(_, span) => *typ = Some(Type::int(*span)),
+            Literal::Number(_, span) => {
+                let unif = local.fresh(*span);
+                local.unify_int(unif.clone(), *span);
+                *typ = Some(unif)
+            }
             Literal::Unit(span) => *typ = Some(Type::unit(*span)),
         },
         Expr::Op(op, args, typ, span) => {
@@ -90,11 +89,10 @@ pub fn infer_expr(
                     Type::unit(*span)
                 }
                 Op::Constructor(..) => local.fresh(*span),
-                Op::Get(_) => unreachable!(),
                 Op::SliceIndex => {
                     let result = local.fresh(*span);
                     let arg_type = args[0].get_type();
-                    local.unify(args[1].get_type(), Type::int(*span), *span);
+                    local.unify(args[1].get_type(), IntType::usize().to_type(*span), *span);
                     if let TypeKind::Named(name) = &arg_type.kind {
                         if name == "Slice" {
                             *typ = Some(arg_type.children[0].clone());
@@ -103,6 +101,22 @@ pub fn infer_expr(
                     }
                     local.unify(arg_type, Type::slice(result.clone(), *span), *span);
                     result
+                }
+                Op::Arith(_) => {
+                    local.unify(args[0].get_type(), args[1].get_type(), *span);
+                    local.unify_int(args[0].get_type(), *span);
+                    args[0].get_type()
+                }
+                Op::Cmp(_) => {
+                    local.unify(args[0].get_type(), args[1].get_type(), *span);
+                    local.unify_int(args[0].get_type(), *span);
+                    // TODO: support comparisons for things that aren't integers
+                    Type::bool(*span)
+                }
+                Op::Logic(_) => {
+                    local.unify(args[0].get_type(), Type::bool(*span), *span);
+                    local.unify(args[1].get_type(), Type::bool(*span), *span);
+                    Type::bool(*span)
                 }
             });
         }
@@ -173,14 +187,7 @@ pub fn infer_expr(
             if let Some(mut field_type) = strukt.fields.get(&*field_name).cloned() {
                 generic_sub.typ(&mut field_type);
                 let index = strukt.fields.find_index(&*field_name).unwrap();
-                *expr = Expr::Op(
-                    Op::Get(index),
-                    vec![struct_expr.as_ref().clone()],
-                    Some(field_type),
-                    *span,
-                );
-            } else if let Some(func) = strukt.funcs.get(field_name) {
-                unreachable!()
+                *typ = Some((field_type, index));
             } else {
                 return Err(Error::UnknownName(field_name.clone(), *span));
             }
@@ -214,6 +221,7 @@ pub fn infer_expr(
                 }
             }
         }
+        Expr::MethodCall(..) => todo!(),
     }
 
     Ok(())
@@ -221,7 +229,7 @@ pub fn infer_expr(
 
 fn ensure_lvalue(lvalue: &Expr, set_span: Span) -> Result<(), Error> {
     match lvalue {
-        Expr::Op(Op::Get(_), args, ..) => ensure_lvalue(&args[0], set_span)?,
+        Expr::Field(expr, ..) => ensure_lvalue(expr, set_span)?,
         Expr::Var(..) | Expr::Op(Op::Deref | Op::SliceIndex, ..) => {}
         _ => return Err(Error::BadLValue(lvalue.clone(), set_span)),
     }

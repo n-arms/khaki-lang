@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    ast::{Literal, Type, TypeKind},
+    ast::{Arith, Cmp, IntType, Literal, Logic, Type, TypeKind},
     derive::CorParts,
     emit::text::{LlvmVals, Text},
     ir::{BlockId, End, Func, Instr, Op, Slot, Struct, Value},
@@ -23,10 +23,11 @@ fn str_list<I: AsRef<str>>(elems: impl IntoIterator<Item = I>) -> String {
 }
 
 fn emit_type(typ: &Type) -> String {
+    if let Some(name) = primitive_type(typ) {
+        return name;
+    }
     if let TypeKind::Named(name) = &typ.kind {
-        if let Some(prim) = primitive_name(name) {
-            prim
-        } else if name == "Ptr" {
+        if name == "Ptr" {
             emit_type(&typ.children[0]) + "*"
         } else {
             format!("%\"{}\"", type_name(typ))
@@ -36,16 +37,22 @@ fn emit_type(typ: &Type) -> String {
     }
 }
 
-fn primitive_name(name: &str) -> Option<String> {
-    let new_name = match name {
-        "Int" => "i32",
-        "Bool" => "i8",
-        _ => return None,
-    };
-    Some(new_name.into())
+fn primitive_type(typ: &Type) -> Option<String> {
+    if let Some(int_type) = IntType::from_type(typ) {
+        return Some(format!("i{}", int_type.width()));
+    }
+    if let TypeKind::Named(name) = &typ.kind {
+        if name == "Bool" {
+            return Some("i8".into());
+        }
+    }
+    None
 }
 
 fn type_name(typ: &Type) -> String {
+    if let Some(name) = primitive_type(typ) {
+        return name;
+    }
     match &typ.kind {
         TypeKind::Func => {
             let [args @ .., result] = typ.children.as_slice() else {
@@ -58,9 +65,7 @@ fn type_name(typ: &Type) -> String {
             )
         }
         TypeKind::Named(name) => {
-            if let Some(name) = primitive_name(name) {
-                name
-            } else if name == "Ptr" {
+            if name == "Ptr" {
                 emit_type(&typ.children[0]) + "*"
             } else {
                 format!("{name}[{}]", str_list(typ.children.iter().map(type_name)))
@@ -369,6 +374,115 @@ fn emit_instr(instr: &Instr, text: &mut Text, vals: &mut LlvmVals) {
                 }
                 _ => unreachable!("Builtin {name}"),
             },
+            Op::Arith(arith) => {
+                let args: Vec<_> = instr
+                    .args
+                    .iter()
+                    .map(|arg| load_slot(arg, text, vals))
+                    .collect();
+                let temp = vals.fresh();
+                let op_name = match arith {
+                    Arith::Add => "add",
+                    Arith::Sub => "sub",
+                    Arith::Mul => "mul",
+                    Arith::Div => {
+                        if IntType::from_type(&instr.args[0].1).unwrap().is_signed() {
+                            "sdiv"
+                        } else {
+                            "udiv"
+                        }
+                    }
+                    Arith::ShiftLeft => "shl",
+                    Arith::ShiftRight => "lshr",
+                    Arith::BitAnd => "and",
+                    Arith::BitOr => "or",
+                    Arith::BitNot => todo!(),
+                    Arith::BitXor => "xor",
+                };
+
+                let suffix = if let Some(arg) = args.get(1) {
+                    format!(", {arg}")
+                } else {
+                    "".into()
+                };
+
+                text.pushln(format!(
+                    "{temp} = {op_name} {result_type} {}{suffix}",
+                    args[0]
+                ));
+                store_result(temp, text);
+            }
+            Op::Cmp(cmp_op) => {
+                let a = load_slot(&instr.args[0], text, vals);
+                let b = load_slot(&instr.args[1], text, vals);
+                let cmp = vals.fresh();
+                let bool = vals.fresh();
+                let arg_type = emit_type(&instr.args[0].1);
+                let signed = IntType::from_type(&instr.args[0].1).unwrap().is_signed();
+
+                let op = match cmp_op {
+                    Cmp::Lt => {
+                        if signed {
+                            "slt"
+                        } else {
+                            "ult"
+                        }
+                    }
+                    Cmp::Le => {
+                        if signed {
+                            "sle"
+                        } else {
+                            "ule"
+                        }
+                    }
+                    Cmp::Gt => {
+                        if signed {
+                            "sgt"
+                        } else {
+                            "ugt"
+                        }
+                    }
+                    Cmp::Ge => {
+                        if signed {
+                            "sge"
+                        } else {
+                            "uge"
+                        }
+                    }
+                    Cmp::Eq => "eq",
+                    Cmp::Ne => "ne",
+                };
+
+                text.pushln(format!("{cmp} = icmp {op} {arg_type} {a}, {b}"));
+                text.pushln(format!("{bool} = zext i1 {cmp} to i8"));
+                store_result(bool, text);
+            }
+            Op::Logic(logic) => {
+                let args: Vec<_> = instr
+                    .args
+                    .iter()
+                    .map(|arg| load_slot(arg, text, vals))
+                    .collect();
+                let temp = vals.fresh();
+                let op_name = match logic {
+                    Logic::And => "and",
+                    Logic::Or => "or",
+                    Logic::Xor => "xor",
+                    Logic::Not => "xor",
+                };
+
+                let suffix = if let Some(arg) = args.get(1) {
+                    format!(", {arg}")
+                } else {
+                    "-1".into() // for bitwise not
+                };
+
+                text.pushln(format!(
+                    "{temp} = {op_name} {result_type} {}{suffix}",
+                    args[0]
+                ));
+                store_result(temp, text);
+            }
         },
         Value::Call => {
             // list of (type, val) pairs

@@ -1,11 +1,11 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    ast::{Expr, Func, Op, Span, Struct, Type, cor_name},
+    ast::{Expr, Span, Struct, Type, cor_name},
     typing::{
         env::{Global, Local, Scope},
         infer::infer_expr,
-        solve::{CorResult, Rule, solve},
+        solve::{CorResult, Rule},
         spec::spec_func,
         sub::Sub,
     },
@@ -30,6 +30,7 @@ pub enum Error {
     NeedsTypeAnnotation(Box<Expr>, Span),
     BadLValue(Expr, Span),
     BadArraySize(usize, Span),
+    BadInt(Type, Span),
 }
 
 pub fn type_program(program: &[Struct]) -> Result<HashMap<Spec, Struct>, Error> {
@@ -84,7 +85,7 @@ pub fn type_program(program: &[Struct]) -> Result<HashMap<Spec, Struct>, Error> 
             infer_expr(&mut func.body, &global, &mut local, &scope)?;
             println!("Infered expr {:#?}", func.body);
             local.unify(func.result.clone(), func.body.get_type(), func.result.span);
-            let sub = local.solve(&cor_list)?;
+            let sub = local.solve(&cor_list, func.result.span)?;
             println!("Got sub {sub:?}");
             println!("Unsubbed func: {func:#?}");
             sub.func(func);

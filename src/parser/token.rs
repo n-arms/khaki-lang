@@ -55,10 +55,42 @@ pub enum TokenKind {
     False,
     #[token("!")]
     Bang,
+    #[token("yield")]
+    Yield,
     #[token("&")]
     Ampersand,
     #[token("*")]
     Star,
-    #[token("yield")]
-    Yield,
+    #[token("+")]
+    Plus,
+    #[token("-")]
+    Dash,
+    #[token("/")]
+    Slash,
+    #[token("<<")]
+    ShiftLeft,
+    #[token(">>")]
+    ShiftRight,
+    #[token("|")]
+    BitOr,
+    #[token("~")]
+    BitNot,
+    #[token("^")]
+    BitXor,
+    #[token(">")]
+    GreaterThan,
+    #[token(">=")]
+    GreaterEqual,
+    #[token("<")]
+    LessThan,
+    #[token("<=")]
+    LessEqual,
+    #[token("==")]
+    DoubleEquals,
+    #[token("!=")]
+    NotEquals,
+    #[token("&&")]
+    LogicAnd,
+    #[token("||")]
+    LogicOr,
 }

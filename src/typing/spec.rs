@@ -23,9 +23,10 @@ pub fn spec_func(func: &Func) -> impl IntoIterator<Item = Spec> {
 
 fn spec_expr(expr: &Expr, specs: &mut HashSet<Spec>) {
     match expr {
-        Expr::Literal(_, typ) | Expr::Var(_, typ, _) | Expr::Field(_, _, typ, _) => {
+        Expr::Literal(_, typ) | Expr::Var(_, typ, _) => {
             spec_type(typ.as_ref().unwrap(), specs);
         }
+        Expr::Field(_, _, meta, _) => spec_type(&meta.as_ref().unwrap().0, specs),
         Expr::Func(struct_name, _, meta, _) => {
             let (typ, generics) = meta.as_ref().unwrap();
             spec_type(typ, specs);
@@ -59,6 +60,7 @@ fn spec_expr(expr: &Expr, specs: &mut HashSet<Spec>) {
                 spec_expr(result, specs);
             }
         }
+        Expr::MethodCall(..) => unreachable!(),
         Expr::Array(_, elems, elem_type, _) => {
             for elem in elems.iter().flatten() {
                 spec_expr(elem, specs);

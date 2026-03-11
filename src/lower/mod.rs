@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::{
-    ast::{self, Type, TypeKind},
+    ast::{self, IntType, Type, TypeKind},
     ir,
     lower::builder::FuncBuilder,
     typing::Spec,
@@ -184,30 +184,6 @@ fn lower_expr(expr: &ast::Expr, fb: &mut FuncBuilder, env: &Env) -> ir::Slot {
                         *span,
                     )
                 }
-                ast::Op::Get(field_index) => {
-                    let struct_type = arg_vals[0].1.clone();
-                    let TypeKind::Named(struct_name) = &struct_type.kind else {
-                        unreachable!();
-                    };
-                    let struct_ref = fb.instr(
-                        Type::ptr(struct_type, *span),
-                        ir::Value::Ref,
-                        arg_vals.clone(),
-                        *span,
-                    );
-                    let field_ptr = fb.instr(
-                        Type::ptr(result.clone(), *span),
-                        ir::Value::FieldRef(*field_index),
-                        vec![struct_ref],
-                        *span,
-                    );
-                    fb.instr(
-                        result,
-                        ir::Value::Op(ir::Op::Builtin("ptr_get".into())),
-                        vec![field_ptr],
-                        *span,
-                    )
-                }
                 ast::Op::Constructor(..) => {
                     let TypeKind::Named(struct_name) = &result.kind else {
                         unreachable!();
@@ -257,6 +233,24 @@ fn lower_expr(expr: &ast::Expr, fb: &mut FuncBuilder, env: &Env) -> ir::Slot {
                     )
                 }
                 ast::Op::If | ast::Op::While | ast::Op::Ref => unreachable!(),
+                ast::Op::Arith(arith) => fb.instr(
+                    result,
+                    ir::Value::Op(ir::Op::Arith(arith.clone())),
+                    arg_vals,
+                    *span,
+                ),
+                ast::Op::Cmp(cmp) => fb.instr(
+                    result,
+                    ir::Value::Op(ir::Op::Cmp(cmp.clone())),
+                    arg_vals,
+                    *span,
+                ),
+                ast::Op::Logic(logic) => fb.instr(
+                    result,
+                    ir::Value::Op(ir::Op::Logic(logic.clone())),
+                    arg_vals,
+                    *span,
+                ),
             }
         }
         ast::Expr::Call(func, args, _, span) => {
@@ -268,6 +262,7 @@ fn lower_expr(expr: &ast::Expr, fb: &mut FuncBuilder, env: &Env) -> ir::Slot {
 
             fb.instr(result, ir::Value::Call, instr_args, *span)
         }
+        ast::Expr::MethodCall(..) => todo!(),
         ast::Expr::Block(stmts, expr, span) => {
             let mut inner = env.clone();
             for stmt in stmts {
@@ -302,7 +297,34 @@ fn lower_expr(expr: &ast::Expr, fb: &mut FuncBuilder, env: &Env) -> ir::Slot {
                 )
             }
         }
-        ast::Expr::Field(..) => unreachable!(),
+        ast::Expr::Field(expr, name, meta, span) => {
+            let (result_type, field_index) = meta.clone().unwrap();
+
+            let expr_val = lower_expr(expr, fb, env);
+
+            let struct_type = expr_val.1.clone();
+            let TypeKind::Named(struct_name) = &struct_type.kind else {
+                unreachable!();
+            };
+            let struct_ref = fb.instr(
+                Type::ptr(struct_type, *span),
+                ir::Value::Ref,
+                vec![expr_val],
+                *span,
+            );
+            let field_ptr = fb.instr(
+                Type::ptr(result.clone(), *span),
+                ir::Value::FieldRef(field_index),
+                vec![struct_ref],
+                *span,
+            );
+            fb.instr(
+                result,
+                ir::Value::Op(ir::Op::Builtin("ptr_get".into())),
+                vec![field_ptr],
+                *span,
+            )
+        }
         ast::Expr::Array(size, elems, elem_type, span) => {
             let elem_slots = elems
                 .iter()
@@ -327,7 +349,7 @@ fn lower_expr(expr: &ast::Expr, fb: &mut FuncBuilder, env: &Env) -> ir::Slot {
                 *span,
             );
             let array_size = fb.instr(
-                Type::int(*span),
+                IntType::usize().to_type(*span),
                 ir::Value::Literal(ast::Literal::Number(size.to_string(), *span)),
                 vec![],
                 *span,
@@ -360,8 +382,9 @@ fn lower_lvalue_ref(expr: &ast::Expr, fb: &mut FuncBuilder, env: &Env) -> ir::Sl
             *span,
         ),
         ast::Expr::Op(ast::Op::Deref, args, ..) => lower_expr(&args[0], fb, env),
-        ast::Expr::Op(ast::Op::Get(field_index), args, _, span) => {
-            let container_ptr = lower_lvalue_ref(&args[0], fb, env);
+        ast::Expr::Field(expr, name, meta, span) => {
+            let (_, field_index) = meta.as_ref().unwrap();
+            let container_ptr = lower_lvalue_ref(&expr, fb, env);
             fb.instr(
                 result,
                 ir::Value::FieldRef(*field_index),
@@ -394,11 +417,11 @@ fn lower_lvalue_ref(expr: &ast::Expr, fb: &mut FuncBuilder, env: &Env) -> ir::Sl
             fb.instr(result, ir::Value::IndexRef, vec![backing_ptr, index], span)
         }
         ast::Expr::Func(..)
-        | ast::Expr::Field(..)
         | ast::Expr::Op(..)
         | ast::Expr::Literal(..)
         | ast::Expr::Call(..)
         | ast::Expr::Array(..)
+        | ast::Expr::MethodCall(..)
         | ast::Expr::Block(..) => unreachable!(),
     }
 }

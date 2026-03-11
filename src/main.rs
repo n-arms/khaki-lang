@@ -1,7 +1,7 @@
 use std::{collections::HashMap, fs};
 
 use crate::{
-    ast::{Expr, Func, Op, Span, Struct, Type},
+    ast::{Expr, Func, IntType, Op, Span, Struct, Type},
     derive::{derive_constructors, derive_cor_structs},
     emit::emit_program,
     lower::lower_program,
@@ -23,94 +23,59 @@ fn main() {
     let source = r#"
     struct Vec[t] {
         elems: []t
-        length: Int
+        length: U32
 
         func new(buf: []t): Vec[t] = Vec(buf, 0)
-        func get(vec: Vec[t], index: Int): t = vec.elems[index]
+        func get(vec: Vec[t], index: U32): t = vec.elems[index]
         func push(vec: Ptr[Vec[t]], elem: t): Unit = {
             set vec*.elems[vec*.length] = elem;
-            set vec*.length = Int.add(vec*.length, 1);
+            set vec*.length = vec*.length + 1;
         }
     }
 
     struct Main {
-        func main(): Int = {
-            let buf = [10]Int {};
+        func main(): U32 = {
+            let buf = [10]U32 {};
             let vec = Vec.new(buf);
             5
         }
     }
     "#;
 
+    // let source = r#"
+    //     struct Main {
+    //         func main(): I32 = if 1==2 {
+    //             7 | 5
+    //         } else {
+    //             7 | 8
+    //         }
+    //     }
+    // "#;
+
     let tokens = scan_program(source).unwrap();
     let mut ast = parse_program(source, &tokens).unwrap();
 
     let span: Span = (0..0).into();
-    let int_type = Type::int(span);
     ast.push(Struct {
-        name: "Int".into(),
+        name: "I32".into(),
         span,
         generics: Vec::new(),
         fields: OrdMap::new(),
-        funcs: HashMap::from([
-            (
-                String::from("add"),
-                Func {
-                    name: "add".into(),
-                    is_cor: false,
-                    args: vec![
-                        ("a".into(), int_type.clone()),
-                        ("b".into(), int_type.clone()),
-                    ],
-                    result: int_type.clone(),
-                    body: Expr::Op(
-                        Op::Builtin("int_add".into()),
-                        vec![
-                            Expr::Var("a".into(), Some(int_type.clone()), span),
-                            Expr::Var("b".into(), Some(int_type.clone()), span),
-                        ],
-                        Some(int_type.clone()),
-                        span,
-                    ),
-                },
-            ),
-            (
-                String::from("less_than"),
-                Func {
-                    name: "less_than".into(),
-                    is_cor: false,
-                    args: vec![
-                        ("a".into(), int_type.clone()),
-                        ("b".into(), int_type.clone()),
-                    ],
-                    result: Type::bool(span),
-                    body: Expr::Op(
-                        Op::Builtin("int_less_than".into()),
-                        vec![
-                            Expr::Var("a".into(), Some(int_type.clone()), span),
-                            Expr::Var("b".into(), Some(int_type.clone()), span),
-                        ],
-                        Some(Type::bool(span)),
-                        span,
-                    ),
-                },
-            ),
-            (
-                String::from("print"),
-                Func {
-                    name: "print".into(),
-                    is_cor: false,
-                    args: vec![("a".into(), int_type.clone())],
-                    result: Type::unit(span),
-                    body: Expr::Op(
-                        Op::Builtin("int_print".into()),
-                        vec![Expr::Var("a".into(), Some(int_type.clone()), span)],
-                        Some(Type::unit(span)),
-                        span,
-                    ),
-                },
-            ),
-        ]),
+        funcs: HashMap::new(),
+    });
+    ast.push(Struct {
+        name: "U32".into(),
+        span,
+        generics: Vec::new(),
+        fields: OrdMap::new(),
+        funcs: HashMap::new(),
+    });
+    ast.push(Struct {
+        name: "U8".into(),
+        span,
+        generics: Vec::new(),
+        fields: OrdMap::new(),
+        funcs: HashMap::new(),
     });
     ast.push(Struct {
         name: "Unit".into(),
@@ -125,7 +90,7 @@ fn main() {
         generics: vec!["t".into()],
         fields: [
             ("ptr".into(), Type::ptr(Type::generic("t", span), span)),
-            ("length".into(), Type::int(span)),
+            ("length".into(), IntType::usize().to_type(span)),
         ]
         .into_iter()
         .collect(),

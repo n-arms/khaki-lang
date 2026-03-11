@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::{
     ast::{Span, Struct, Type, TypeKind},
@@ -39,6 +39,7 @@ impl Global {
 pub struct Local {
     next_unif: usize,
     rules: Vec<Rule>,
+    unifs: HashSet<usize>,
     is_cor: bool,
 }
 
@@ -47,12 +48,14 @@ impl Local {
         Self {
             next_unif: 0,
             rules: Vec::new(),
+            unifs: HashSet::new(),
             is_cor,
         }
     }
 
     pub fn fresh(&mut self, span: Span) -> Type {
         let unif = self.next_unif;
+        self.unifs.insert(unif);
         self.next_unif += 1;
         Type {
             kind: TypeKind::Unif(unif),
@@ -73,12 +76,16 @@ impl Local {
         })
     }
 
-    pub fn solve(self, cor_list: &HashMap<String, CorResult>) -> Result<Sub, Error> {
-        solve::solve(self.rules, cor_list)
+    pub fn solve(self, cor_list: &HashMap<String, CorResult>, span: Span) -> Result<Sub, Error> {
+        solve::solve(self.rules, &self.unifs, cor_list, span)
     }
 
     pub fn is_cor(&self) -> bool {
         self.is_cor
+    }
+
+    pub fn unify_int(&mut self, int: Type, span: Span) {
+        self.rules.push(Rule::UnifyInt(int, span));
     }
 }
 

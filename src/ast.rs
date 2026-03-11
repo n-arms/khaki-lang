@@ -94,7 +94,21 @@ pub struct IntType {
     signed: bool,
 }
 
+const SIZE_WIDTH: usize = 32;
+
 impl IntType {
+    pub fn usize() -> Self {
+        Self {
+            width: SIZE_WIDTH,
+            signed: false,
+        }
+    }
+    pub fn isize() -> Self {
+        Self {
+            width: SIZE_WIDTH,
+            signed: true,
+        }
+    }
     pub fn signed(width: usize) -> Self {
         Self {
             width,
@@ -107,6 +121,12 @@ impl IntType {
             signed: false,
         }
     }
+    pub fn is_signed(&self) -> bool {
+        self.signed
+    }
+    pub fn width(&self) -> usize {
+        self.width
+    }
     pub fn to_type(&self, span: Span) -> Type {
         Type::named(
             format!("{}{}", if self.signed { "I" } else { "U" }, self.width),
@@ -114,7 +134,6 @@ impl IntType {
             span,
         )
     }
-
     pub fn from_type(typ: &Type) -> Option<Self> {
         let TypeKind::Named(name) = &typ.kind else {
             return None;
@@ -202,16 +221,50 @@ pub enum TypeKind {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Op {
     Builtin(String),
+    Arith(Arith),
+    Cmp(Cmp),
+    Logic(Logic),
     Await,
     Yield,
     Ref,
     Deref,
     If,
     While,
-    Get(usize),
     Constructor(String),
     // Slice[t], Int, t
     SliceIndex,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Arith {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    ShiftLeft,
+    ShiftRight,
+    BitAnd,
+    BitOr,
+    BitNot,
+    BitXor,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Cmp {
+    Lt,
+    Le,
+    Gt,
+    Ge,
+    Eq,
+    Ne,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Logic {
+    And,
+    Or,
+    Xor,
+    Not,
 }
 
 #[derive(Clone, Debug)]
@@ -223,7 +276,8 @@ pub enum Expr {
     Op(Op, Vec<Expr>, Option<Type>, Span),
     Call(Box<Expr>, Vec<Expr>, Option<Type>, Span),
     Block(Vec<Stmt>, Option<Box<Expr>>, Span),
-    Field(Box<Expr>, String, Option<Type>, Span),
+    Field(Box<Expr>, String, Option<(Type, usize)>, Span),
+    MethodCall(Box<Expr>, String, Vec<Expr>, Option<Type>, Span),
     Array(usize, Option<Vec<Expr>>, Option<Type>, Span),
 }
 
@@ -240,9 +294,10 @@ impl Expr {
             Expr::Var(_, typ, _)
             | Expr::Literal(_, typ)
             | Expr::Op(_, _, typ, _)
-            | Expr::Field(_, _, typ, _)
+            | Expr::MethodCall(_, _, _, typ, _)
             | Expr::Call(_, _, typ, _) => typ.clone().unwrap(),
             Expr::Func(_, _, meta, _) => meta.as_ref().unwrap().0.clone(),
+            Expr::Field(_, _, meta, _) => meta.clone().unwrap().0,
             Expr::Block(_, expr, span) => {
                 if let Some(expr) = expr {
                     expr.get_type()

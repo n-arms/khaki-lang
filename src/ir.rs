@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::{
-    ast::{Literal, Span, Type},
+    ast::{Arith, Cmp, Literal, Logic, Span, Type},
     ord_map::OrdMap,
     typing::Spec,
 };
@@ -63,6 +63,9 @@ pub enum Value {
 #[derive(Clone, Debug)]
 pub enum Op {
     Builtin(String),
+    Arith(Arith),
+    Cmp(Cmp),
+    Logic(Logic),
 }
 
 #[derive(Clone, Debug)]
