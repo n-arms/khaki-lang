@@ -20,48 +20,64 @@ mod parser;
 mod typing;
 
 fn main() {
-    let source = r#"
-    struct Vec[t] {
-        elems: []t
-        length: U32
-
-        func new(buf: []t): Vec[t] = Vec(buf, 0)
-        func get(vec: Vec[t], index: U32): t = vec.elems[index]
-        func push(vec: Ptr[Vec[t]], elem: t): Unit = {
-            set vec*.elems[vec*.length] = elem;
-            set vec*.length = vec*.length + 1;
-        }
-    }
-
-    struct Main {
-        func main(): U32 = {
-            let buf = [10]U32 {};
-            let vec = Vec.new(buf);
-            5
-        }
-    }
-    "#;
-
     // let source = r#"
-    //     struct Main {
-    //         func main(): I32 = if 1==2 {
-    //             7 | 5
-    //         } else {
-    //             7 | 8
-    //         }
+    // struct Vec[t] {
+    //     elems: []t
+    //     length: U32
+
+    //     func new(buf: []t): Vec[t] = Vec(buf, 0)
+    //     func get(vec: Vec[t], index: U32): t = vec.elems[index]
+    //     func push(vec: Ptr[Vec[t]], elem: t): Unit = {
+    //         set vec*.elems[vec*.length] = elem;
+    //         set vec*.length = vec*.length + 1;
     //     }
+    // }
+
+    // struct Main {
+    //     func main(): U32 = {
+    //         let buf = [10]U32 {};
+    //         let vec = Vec.new(buf);
+    //         5
+    //     }
+    // }
     // "#;
+
+    let source = r#"
+        struct Main {
+            func main(): I32 = {
+                Main.three().print();
+                42
+            }
+
+            func three(): I32 = 3
+        }
+    "#;
 
     let tokens = scan_program(source).unwrap();
     let mut ast = parse_program(source, &tokens).unwrap();
 
     let span: Span = (0..0).into();
+    let i32_type = IntType::signed(32).to_type(span);
     ast.push(Struct {
         name: "I32".into(),
         span,
         generics: Vec::new(),
         fields: OrdMap::new(),
-        funcs: HashMap::new(),
+        funcs: HashMap::from([(
+            "print".into(),
+            Func {
+                name: "print".into(),
+                args: vec![("self".into(), i32_type)],
+                result: Type::unit(span),
+                is_cor: false,
+                body: Expr::Op(
+                    Op::Builtin("int_print".into()),
+                    vec![Expr::Var("self".into(), None, span)],
+                    None,
+                    span,
+                ),
+            },
+        )]),
     });
     ast.push(Struct {
         name: "U32".into(),
