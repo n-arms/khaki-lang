@@ -20,28 +20,6 @@ mod parser;
 mod typing;
 
 fn main() {
-    // let source = r#"
-    // struct Vec[t] {
-    //     elems: []t
-    //     length: U32
-
-    //     func new(buf: []t): Vec[t] = Vec(buf, 0)
-    //     func get(vec: Vec[t], index: U32): Ptr[t] = vec.elems[index]&
-    //     func push(vec: Ptr[Vec[t]], elem: t): Unit = {
-    //         set vec*.elems[vec*.length] = elem;
-    //         set vec*.length = vec*.length + 1;
-    //     }
-    // }
-
-    // struct Main {
-    //     func main(): U32 = {
-    //         let buf = [10]U32 {};
-    //         let vec = Vec.new(buf);
-    //         vec.push(5);
-    //         vec.get()*
-    //     }
-    // }
-    // "#;
     let source = r#"
     struct Vec[t] {
         elems: []t
@@ -59,7 +37,7 @@ fn main() {
         func main(): U32 = {
             let buf = [10]U32 {};
             let vec = Vec.new(buf);
-            Vec.push(vec&, 5);
+            vec.push(5);
             vec.get(0)*
         }
     }

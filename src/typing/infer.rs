@@ -228,10 +228,10 @@ pub fn infer_expr(
             }
             infer_expr(struct_expr, global, local, scope)?;
             let struct_type = struct_expr.get_type();
-            let TypeKind::Named(struct_name) = &struct_type.kind else {
+            let TypeKind::Named(struct_name) = struct_type.kind else {
                 return Err(Error::NeedsTypeAnnotation(struct_expr.clone(), *span));
             };
-            let strukt = global.get_struct(struct_name, *span)?;
+            let strukt = global.get_struct(&struct_name, *span)?;
             let Some(func) = strukt.funcs.get(method_name) else {
                 return Err(Error::UnknownName(method_name.clone(), *span));
             };
@@ -248,11 +248,10 @@ pub fn infer_expr(
             } else {
                 func.result.clone()
             };
-            let mut func_type = Type::func(func.arg_types(), result_type.clone(), *span);
-            println!("Built unsubbed func type {func_type:?}");
-            generic_sub.typ(&mut func_type);
+            let mut arg_types = func.arg_types();
+            arg_types.iter_mut().for_each(|typ| generic_sub.typ(typ));
             generic_sub.typ(&mut result_type);
-            println!("Built subbed func type {func_type:?}");
+            let func_type = Type::func(arg_types.clone(), result_type.clone(), *span);
 
             let func_expr = Expr::Func(
                 struct_name.clone(),
@@ -261,8 +260,27 @@ pub fn infer_expr(
                 *span,
             );
 
-            let mut args = args.clone();
-            args.insert(0, struct_expr.as_ref().clone());
+            let should_ref = arg_types[0].is_ptr() && !struct_expr.get_type().is_ptr();
+
+            let mut args = args.clone(); // TODO: check if the first arg needs to be an lvalue
+            args.insert(
+                0,
+                if should_ref {
+                    ensure_lvalue(&struct_expr, *span)?;
+                    Expr::Op(
+                        Op::Ref,
+                        vec![struct_expr.as_ref().clone()],
+                        Some(Type::ptr(struct_expr.get_type(), *span)),
+                        *span,
+                    )
+                } else {
+                    struct_expr.as_ref().clone()
+                },
+            );
+
+            for (actual, expected) in args.iter().zip(arg_types) {
+                local.unify(actual.get_type(), expected, *span);
+            }
 
             *expr = Expr::Call(Box::new(func_expr), args, Some(result_type.clone()), *span);
         }

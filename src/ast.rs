@@ -207,6 +207,14 @@ impl Type {
             children: Vec::new(),
         }
     }
+
+    pub fn is_ptr(&self) -> bool {
+        if let TypeKind::Named(name) = &self.kind {
+            name == "Ptr"
+        } else {
+            false
+        }
+    }
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
