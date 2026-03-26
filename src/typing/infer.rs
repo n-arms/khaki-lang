@@ -221,12 +221,12 @@ pub fn infer_expr(
                 }
             }
         }
-        Expr::MethodCall(struct_expr, method_name, args, typ, span) => {
+        Expr::MethodCall(struct_expr, method_name, args, _, span) => {
+            println!("In method call of {method_name}");
             for arg in args.iter_mut() {
                 infer_expr(arg, global, local, scope)?;
             }
             infer_expr(struct_expr, global, local, scope)?;
-            println!("infered elems to struct expr {struct_expr:?}, args {args:?}");
             let struct_type = struct_expr.get_type();
             let TypeKind::Named(struct_name) = &struct_type.kind else {
                 return Err(Error::NeedsTypeAnnotation(struct_expr.clone(), *span));
@@ -235,19 +235,24 @@ pub fn infer_expr(
             let Some(func) = strukt.funcs.get(method_name) else {
                 return Err(Error::UnknownName(method_name.clone(), *span));
             };
+            println!("Found method struct {strukt:?}");
             let mut generic_sub = Sub::default();
             let generics = struct_type.children.clone();
             for (name, typ) in strukt.generics.iter().zip(&generics) {
                 generic_sub.set_generic(name.clone(), typ.clone());
             }
+            println!("Built generic sub {generic_sub:?}");
 
-            let result_type = if func.is_cor {
+            let mut result_type = if func.is_cor {
                 Type::named(cor_name(&strukt.name, &func.name), generics.clone(), *span)
             } else {
                 func.result.clone()
             };
             let mut func_type = Type::func(func.arg_types(), result_type.clone(), *span);
+            println!("Built unsubbed func type {func_type:?}");
             generic_sub.typ(&mut func_type);
+            generic_sub.typ(&mut result_type);
+            println!("Built subbed func type {func_type:?}");
 
             let func_expr = Expr::Func(
                 struct_name.clone(),

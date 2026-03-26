@@ -26,7 +26,7 @@ fn main() {
     //     length: U32
 
     //     func new(buf: []t): Vec[t] = Vec(buf, 0)
-    //     func get(vec: Vec[t], index: U32): t = vec.elems[index]
+    //     func get(vec: Vec[t], index: U32): Ptr[t] = vec.elems[index]&
     //     func push(vec: Ptr[Vec[t]], elem: t): Unit = {
     //         set vec*.elems[vec*.length] = elem;
     //         set vec*.length = vec*.length + 1;
@@ -37,20 +37,32 @@ fn main() {
     //     func main(): U32 = {
     //         let buf = [10]U32 {};
     //         let vec = Vec.new(buf);
-    //         5
+    //         vec.push(5);
+    //         vec.get()*
     //     }
     // }
     // "#;
-
     let source = r#"
-        struct Main {
-            func main(): I32 = {
-                Main.three().print();
-                42
-            }
+    struct Vec[t] {
+        elems: []t
+        length: U32
 
-            func three(): I32 = 3
+        func new(buf: []t): Vec[t] = Vec(buf, 0)
+        func get(vec: Vec[t], index: U32): Ptr[t] = vec.elems[index]&
+        func push(vec: Ptr[Vec[t]], elem: t): Unit = {
+            set vec*.elems[vec*.length] = elem;
+            set vec*.length = vec*.length + 1;
         }
+    }
+
+    struct Main {
+        func main(): U32 = {
+            let buf = [10]U32 {};
+            let vec = Vec.new(buf);
+            Vec.push(vec&, 5);
+            vec.get(0)*
+        }
+    }
     "#;
 
     let tokens = scan_program(source).unwrap();
