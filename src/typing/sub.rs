@@ -71,9 +71,9 @@ impl Sub {
                 }
             }
             Expr::Func(_, _, meta, _) => {
-                if let Some((typ, generics)) = meta.as_mut() {
+                if let Some((typ, struct_generics, func_generics)) = meta.as_mut() {
                     self.typ(typ);
-                    for typ in generics {
+                    for typ in struct_generics.iter_mut().chain(func_generics.iter_mut()) {
                         self.typ(typ);
                     }
                 }

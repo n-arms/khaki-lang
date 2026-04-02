@@ -1,5 +1,5 @@
 use crate::{
-    ast::{Expr, IntType, Literal, Op, Span, Stmt, Type, TypeKind, cor_name},
+    ast::{Expr, FuncSpec, IntType, Literal, Op, Span, Stmt, Type, TypeKind, cor_name},
     typing::{
         Error,
         env::{Global, Local, Scope},
@@ -22,17 +22,20 @@ pub fn infer_expr(
             let strukt = global.get_struct(struct_name, *span)?;
             let func = strukt
                 .funcs
-                .get(func_name)
+                .get(&FuncSpec::named(func_name.to_owned()))
                 .ok_or_else(|| Error::UnknownName(func_name.to_string(), *span))?;
-            let (generics, generic_sub) = instantiate(&strukt.generics, local, *span);
+            let (struct_generics, mut generic_sub) = instantiate(&strukt.generics, local, *span);
+            let func_generics = instantiate_into(&strukt.generics, &mut generic_sub, local, *span);
             let result_type = if func.is_cor {
-                Type::named(cor_name(&strukt.name, &func.name), generics.clone(), *span)
+                let mut cor_generics = struct_generics.clone();
+                cor_generics.extend(func_generics.clone());
+                Type::named(cor_name(&strukt.name, &func.name), cor_generics, *span)
             } else {
                 func.result.clone()
             };
             let mut func_type = Type::func(func.arg_types(), result_type, *span);
             generic_sub.typ(&mut func_type);
-            *meta = Some((func_type, generics));
+            *meta = Some((func_type, struct_generics, func_generics));
         }
         Expr::Literal(literal, typ) => match literal {
             Literal::Bool(_, span) => *typ = Some(Type::bool(*span)),
@@ -232,19 +235,27 @@ pub fn infer_expr(
                 return Err(Error::NeedsTypeAnnotation(struct_expr.clone(), *span));
             };
             let strukt = global.get_struct(&struct_name, *span)?;
-            let Some(func) = strukt.funcs.get(method_name) else {
+            let Some(func) = strukt.funcs.get(&FuncSpec::named(method_name.to_owned())) else {
                 return Err(Error::UnknownName(method_name.clone(), *span));
             };
             println!("Found method struct {strukt:?}");
             let mut generic_sub = Sub::default();
-            let generics = struct_type.children.clone();
-            for (name, typ) in strukt.generics.iter().zip(&generics) {
+            let struct_generics = struct_type.children.clone();
+            for (name, typ) in strukt.generics.iter().zip(&struct_generics) {
                 generic_sub.set_generic(name.clone(), typ.clone());
+            }
+            let mut func_generics = Vec::new();
+            for name in func.generics.iter() {
+                let typ = local.fresh(*span);
+                func_generics.push(typ.clone());
+                generic_sub.set_generic(name.clone(), typ);
             }
             println!("Built generic sub {generic_sub:?}");
 
             let mut result_type = if func.is_cor {
-                Type::named(cor_name(&strukt.name, &func.name), generics.clone(), *span)
+                let mut cor_generics = struct_generics.clone();
+                cor_generics.extend(func_generics.clone());
+                Type::named(cor_name(&strukt.name, &func.name), cor_generics, *span)
             } else {
                 func.result.clone()
             };
@@ -256,7 +267,7 @@ pub fn infer_expr(
             let func_expr = Expr::Func(
                 struct_name.clone(),
                 method_name.clone(),
-                Some((func_type, generics)),
+                Some((func_type, struct_generics, func_generics)),
                 *span,
             );
 
@@ -299,8 +310,18 @@ fn ensure_lvalue(lvalue: &Expr, set_span: Span) -> Result<(), Error> {
 }
 
 fn instantiate(generics: &[String], local: &mut Local, span: Span) -> (Vec<Type>, Sub) {
-    let mut generic_types = Vec::new();
     let mut sub = Sub::default();
+    let types = instantiate_into(generics, &mut sub, local, span);
+    (types, sub)
+}
+
+fn instantiate_into(
+    generics: &[String],
+    sub: &mut Sub,
+    local: &mut Local,
+    span: Span,
+) -> Vec<Type> {
+    let mut generic_types = Vec::new();
 
     for name in generics {
         let typ = local.fresh(span);
@@ -308,5 +329,5 @@ fn instantiate(generics: &[String], local: &mut Local, span: Span) -> (Vec<Type>
         sub.set_generic(name.to_string(), typ);
     }
 
-    (generic_types, sub)
+    generic_types
 }

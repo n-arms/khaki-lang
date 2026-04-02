@@ -6,7 +6,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    ast::{Expr, Func, Op, Struct, Type, cor_name},
+    ast::{Expr, Func, FuncSpec, Op, Struct, Type, cor_name},
     ord_map::OrdMap,
 };
 
@@ -42,13 +42,16 @@ pub fn derive_constructors(program: &mut Vec<Struct>) {
 
         let func = Func {
             name: strukt.name.clone(),
+            generics: Vec::new(),
             args: func_args,
             result,
             is_cor: false,
             body,
         };
 
-        strukt.funcs.insert(strukt.name.clone(), func);
+        strukt
+            .funcs
+            .insert(FuncSpec::named(strukt.name.clone()), func);
     }
 }
 
@@ -72,11 +75,19 @@ pub fn derive_cor_structs(program: &mut Vec<Struct>) -> HashMap<String, CorParts
                 let cor_generic_types: Vec<_> = strukt
                     .generics
                     .iter()
+                    .chain(func.generics.iter())
                     .map(|name| Type::generic(name.clone(), span))
                     .collect();
-                let cor_type = Type::named(cor_name.clone(), cor_generic_types, span);
+                let cor_generics: Vec<_> = strukt
+                    .generics
+                    .iter()
+                    .chain(func.generics.iter())
+                    .cloned()
+                    .collect();
+                let cor_type = Type::named(cor_name.clone(), cor_generic_types.clone(), span);
                 let cor_func = Func {
                     name: "poll".into(),
+                    generics: cor_generics.clone(),
                     args: vec![
                         ("cor".into(), Type::ptr(cor_type, span)),
                         ("result".into(), Type::ptr(func.result.clone(), span)),
@@ -87,9 +98,9 @@ pub fn derive_cor_structs(program: &mut Vec<Struct>) -> HashMap<String, CorParts
                 };
                 let cor_struct = Struct {
                     name: cor_name,
-                    generics: strukt.generics.clone(),
+                    generics: cor_generics,
                     fields: OrdMap::new(),
-                    funcs: HashMap::from([("poll".into(), cor_func)]),
+                    funcs: HashMap::from([(FuncSpec::named("poll".to_owned()), cor_func)]),
                     span: func.result.span,
                 };
                 structs.push(cor_struct);

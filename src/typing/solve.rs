@@ -18,6 +18,7 @@ pub enum Rule {
 
 pub struct CorResult {
     pub generics: Vec<String>,
+    pub func_generics: Vec<String>,
     pub result: Type,
 }
 

@@ -1,14 +1,31 @@
 use core::{fmt, hash};
-use std::{collections::HashMap, ops::Range};
-
-use chumsky::span::SimpleSpan;
+use std::collections::HashMap;
 
 use crate::ord_map::OrdMap;
 
+pub type ByteIndex = usize;
+pub type FileId = usize;
+
 #[derive(Copy, Clone)]
 pub struct Span {
-    pub start: usize,
-    pub end: usize,
+    pub start: ByteIndex,
+    pub end: ByteIndex,
+    pub file_id: FileId,
+}
+
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub struct FuncSpec {
+    pub func_name: String,
+    pub generics: Vec<Type>,
+}
+
+impl FuncSpec {
+    pub fn named(name: String) -> Self {
+        Self {
+            func_name: name,
+            generics: Vec::new(),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -16,13 +33,14 @@ pub struct Struct {
     pub name: String,
     pub generics: Vec<String>,
     pub fields: OrdMap<String, Type>,
-    pub funcs: HashMap<String, Func>,
+    pub funcs: HashMap<FuncSpec, Func>,
     pub span: Span,
 }
 
 #[derive(Clone, Debug)]
 pub struct Func {
     pub name: String,
+    pub generics: Vec<String>,
     pub args: Vec<(String, Type)>,
     pub result: Type,
     pub is_cor: bool,
@@ -279,7 +297,7 @@ pub enum Logic {
 pub enum Expr {
     Var(String, Option<Type>, Span),
     /// all functions are of the form `struct[generics].func()`
-    Func(String, String, Option<(Type, Vec<Type>)>, Span),
+    Func(String, String, Option<(Type, Vec<Type>, Vec<Type>)>, Span),
     Literal(Literal, Option<Type>),
     Op(Op, Vec<Expr>, Option<Type>, Span),
     Call(Box<Expr>, Vec<Expr>, Option<Type>, Span),
@@ -335,24 +353,16 @@ impl Literal {
 
 impl fmt::Debug for Span {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}..{}", self.start, self.end)
+        write!(f, "[file {}]:{}..{}", self.file_id, self.start, self.end)
     }
 }
 
-impl From<SimpleSpan> for Span {
-    fn from(value: SimpleSpan) -> Self {
+impl Span {
+    pub fn new(file_id: FileId, start: ByteIndex, end: ByteIndex) -> Self {
         Self {
-            start: value.start,
-            end: value.end,
-        }
-    }
-}
-
-impl From<Range<usize>> for Span {
-    fn from(value: Range<usize>) -> Self {
-        Self {
-            start: value.start,
-            end: value.end,
+            start,
+            end,
+            file_id,
         }
     }
 }

@@ -1,7 +1,7 @@
 use std::{collections::HashMap, fs};
 
 use crate::{
-    ast::{Expr, Func, IntType, Op, Span, Struct, Type},
+    ast::{Expr, Func, FuncSpec, IntType, Op, Span, Struct, Type},
     derive::{derive_constructors, derive_cor_structs},
     emit::emit_program,
     lower::lower_program,
@@ -20,33 +20,46 @@ mod parser;
 mod typing;
 
 fn main() {
-    let source = r#"
-    struct Vec[t] {
-        elems: []t
-        length: U32
+    // let source = r#"
+    // struct Vec[t] {
+    //     elems: []t
+    //     length: U32
 
-        func new(buf: []t): Vec[t] = Vec(buf, 0)
-        func get(vec: Vec[t], index: U32): Ptr[t] = vec.elems[index]&
-        func push(vec: Ptr[Vec[t]], elem: t): Unit = {
-            set vec*.elems[vec*.length] = elem;
-            set vec*.length = vec*.length + 1;
-        }
+    //     func new(buf: []t): Vec[t] = Vec(buf, 0)
+    //     func get(vec: Vec[t], index: U32): Ptr[t] = vec.elems[index]&
+    //     func push(vec: Ptr[Vec[t]], elem: t): Unit = {
+    //         set vec*.elems[vec*.length] = elem;
+    //         set vec*.length = vec*.length + 1;
+    //     }
+    // }
+
+    // struct Main {
+    //     func main(): U32 = {
+    //         let buf = [10]U32 {};
+    //         let vec = Vec.new(buf);
+    //         vec.push(5);
+    //         vec.get(0)*
+    //     }
+    // }
+    // "#;
+
+    let source = r#"
+    struct Foo {
+        func bar[t](x: t): t = x
     }
 
     struct Main {
         func main(): U32 = {
-            let buf = [10]U32 {};
-            let vec = Vec.new(buf);
-            vec.push(5);
-            vec.get(0)*
+            Foo.bar(3)
         }
     }
     "#;
 
+    let file_id = 0;
     let tokens = scan_program(source).unwrap();
-    let mut ast = parse_program(source, &tokens).unwrap();
+    let mut ast = parse_program(source, &tokens, file_id).unwrap();
 
-    let span: Span = (0..0).into();
+    let span: Span = Span::new(file_id, 0, 0);
     let i32_type = IntType::signed(32).to_type(span);
     ast.push(Struct {
         name: "I32".into(),
@@ -54,9 +67,10 @@ fn main() {
         generics: Vec::new(),
         fields: OrdMap::new(),
         funcs: HashMap::from([(
-            "print".into(),
+            FuncSpec::named("print".into()),
             Func {
                 name: "print".into(),
+                generics: Vec::new(),
                 args: vec![("self".into(), i32_type)],
                 result: Type::unit(span),
                 is_cor: false,
@@ -109,9 +123,10 @@ fn main() {
         generics: Vec::new(),
         fields: OrdMap::new(),
         funcs: HashMap::from([(
-            "not".into(),
+            FuncSpec::named("not".into()),
             Func {
                 name: "not".into(),
+                generics: Vec::new(),
                 args: vec![("x".into(), bool_type.clone())],
                 result: bool_type.clone(),
                 is_cor: false,
@@ -132,9 +147,10 @@ fn main() {
         fields: OrdMap::new(),
         funcs: HashMap::from([
             (
-                String::from("load"),
+                FuncSpec::named("load".into()),
                 Func {
                     name: "load".into(),
+                    generics: Vec::new(),
                     is_cor: false,
                     args: vec![("p".into(), ptr.clone())],
                     result: Type::generic("t", span),
@@ -147,9 +163,10 @@ fn main() {
                 },
             ),
             (
-                String::from("store"),
+                FuncSpec::named("store".into()),
                 Func {
                     name: "store".into(),
+                    generics: Vec::new(),
                     is_cor: false,
                     args: vec![
                         ("p".into(), ptr.clone()),
@@ -175,29 +192,8 @@ fn main() {
     dbg!(&ast);
     let typed = type_program(&ast).unwrap();
     dbg!(&typed);
-    let lowered = lower_program(&typed);
-    dbg!(&lowered);
-    let llvm = emit_program(&lowered, &cor_structs);
-    fs::write("out.ll", llvm).unwrap();
-
-    // let prog = Prog {
-    //     structs: typed,
-    //     builtins: HashMap::from([(
-    //         String::from("int_add"),
-    //         (|elems: Vec<Value>| {
-    //             let [Value::Int(a), Value::Int(b)] = elems.as_slice() else {
-    //                 panic!("Bad args: {elems:?}");
-    //             };
-    //             Value::Int(a + b)
-    //         }) as fn(Vec<Value>) -> Value,
-    //     )]),
-    // };
-
-    // let main = &prog.structs[&Spec {
-    //     struct_name: "Main".into(),
-    //     generics: Vec::new(),
-    // }]
-    //     .funcs["main"];
-
-    // dbg!(eval(&main.body, &Env::default(), &prog));
+    //let lowered = lower_program(&typed);
+    //dbg!(&lowered);
+    //let llvm = emit_program(&lowered, &cor_structs);
+    //fs::write("out.ll", llvm).unwrap();
 }

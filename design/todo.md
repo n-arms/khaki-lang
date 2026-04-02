@@ -8,6 +8,15 @@
 
 # Language Features
 
+## Nested Structs, and Function Generics
+Currently we only support `struct S[t] {}` generics, and no nested structs.
+Nested structs are important for multiple files, and function generics are a nice QoL feature.
+
+## Type Erasure
+- It should be possible to cast to/from a void ptr type to enable type erasure
+  - Needed for scheduling
+  - Just need a `Ptr[t].cast[u](p: Ptr[t]) -> Ptr[u]`
+
 ## Integers
 - Basic operations like add, sub, comparisons, etc
 
