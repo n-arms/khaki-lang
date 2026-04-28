@@ -14,8 +14,8 @@ use logos::Logos;
 
 use crate::{
     ast::{
-        Arith, Cmp, Expr, FileId, Func, FuncSpec, Literal, Logic, Op, Span, Stmt, Struct, Type,
-        TypeKind, constructor_name,
+        Arith, Cmp, Expr, FileId, Func, Literal, Logic, Op, Span, Stmt, Struct, Type, TypeKind,
+        constructor_name,
     },
     parser::token::TokenKind,
 };
@@ -262,21 +262,9 @@ fn strukt<'a, I: Input<'a, Token = TokenKind, Span = SimpleSpan>>(
                 base.pratt((
                     postfix(
                         100,
-                        just(TokenKind::Dot)
-                            .ignore_then(name(input))
-                            .then(call_args.clone().or_not()),
-                        move |lhs, (name, args), e| {
-                            if let Some(args) = args {
-                                Expr::MethodCall(
-                                    Box::new(lhs),
-                                    name,
-                                    args,
-                                    None,
-                                    get_span(e, file_id),
-                                )
-                            } else {
-                                Expr::Field(Box::new(lhs), name, None, get_span(e, file_id))
-                            }
+                        just(TokenKind::Dot).ignore_then(name(input)),
+                        move |lhs, name, e| {
+                            Expr::Field(Box::new(lhs), name, None, get_span(e, file_id))
                         },
                     ),
                     postfix(99, call_args.clone(), move |lhs, args, e| {

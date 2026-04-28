@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::{
     ast::{Span, Type},
-    ir::{Block, BlockId, End, Func, Instr, Slot, Value},
+    ir::{Block, BlockId, End, Func, Instr, Slot, Value, Witness},
 };
 
 pub struct FuncBuilder {
@@ -37,11 +37,11 @@ impl FuncBuilder {
         BlockId(id)
     }
 
-    pub fn slot(&mut self, typ: Type) -> Slot {
+    pub fn slot(&mut self, typ: Type, witness: Witness) -> Slot {
         let slot_id = self.next_slot;
         self.next_slot += 1;
         let slot_name = format!("slot_{slot_id}");
-        Slot(slot_name, typ)
+        Slot(slot_name, typ, witness)
     }
 
     pub fn start_block(&mut self, id: BlockId) {
@@ -67,8 +67,15 @@ impl FuncBuilder {
         );
     }
 
-    pub fn instr(&mut self, result: Type, value: Value, args: Vec<Slot>, span: Span) -> Slot {
-        let slot = self.slot(result);
+    pub fn instr(
+        &mut self,
+        result: Type,
+        witness: Witness,
+        value: Value,
+        args: Vec<Slot>,
+        span: Span,
+    ) -> Slot {
+        let slot = self.slot(result, witness);
         let Some(current) = self.current.as_mut() else {
             panic!("Pushing instr to nonexistent block");
         };

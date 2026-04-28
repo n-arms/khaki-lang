@@ -1,15 +1,20 @@
+//! Witness table usage
+//! Consider each of the following operations:
+//! **Slot:** needs to have the witness of the result/arg to perform a copy
+//! **Field:** needs to know the witnesses of all fields
+//! **FieldRef:** same as above, but doesn't need the witness of the result
+//! **Call:** need witnesses of the args and witnesses of the result
+
 use std::collections::HashMap;
 
 use crate::{
-    ast::{Arith, Cmp, Literal, Logic, Span, Type},
+    ast::{Arith, Cmp, Literal, Logic, Path, Span, Struct, Type},
     ord_map::OrdMap,
-    typing::Spec,
 };
 
 #[derive(Clone, Debug)]
-pub struct Struct {
-    pub name: Spec,
-    pub fields: OrdMap<String, Type>,
+pub struct Module {
+    pub structs: HashMap<String, Struct>,
     pub funcs: HashMap<String, Func>,
 }
 
@@ -33,7 +38,13 @@ pub struct Block {
 pub struct BlockId(pub usize);
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct Slot(pub String, pub Type);
+pub struct Slot(pub String, pub Type, pub Witness);
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum Witness {
+    Static { size: usize, align: usize },
+    Dynamic(Box<Slot>),
+}
 
 #[derive(Clone, Debug)]
 pub struct Instr {
@@ -46,18 +57,25 @@ pub struct Instr {
 #[derive(Clone, Debug)]
 pub enum Value {
     Slot,
-    Func(Spec, String),
+    Func(Path, String),
     Literal(Literal),
     Op(Op),
     Call,
     Ref,
-    // Given a pointer to a struct, make a pointer to the field
-    FieldRef(usize),
-    PackStruct(Spec),
-    Array(usize),
+
+    // Struct operations
+    PackStruct(Path, String),
+    // Given a pointer to a struct and witnesses for each field, make a pointer to the field
+    FieldRef(usize, Vec<Witness>),
+    FieldGet(usize, Vec<Witness>),
+
+    // Array operations
+    // Create an array of the given size
+    Array(usize, Witness),
+    // Take the reference of an array as a ptr
     RefArray,
     // Given a pointer, make a pointer that has indexed by the given amount
-    IndexRef,
+    IndexRef(Witness),
 }
 
 #[derive(Clone, Debug)]

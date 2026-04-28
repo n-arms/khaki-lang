@@ -1,11 +1,41 @@
 use crate::{
-    ast::{Expr, FuncSpec, IntType, Literal, Op, Span, Stmt, Type, TypeKind, cor_name},
+    ast::{AnyMeta, Expr, IntType, Literal, Op, Prim, Span, Stmt, Type, TypeKind, cor_name},
     typing::{
         Error,
         env::{Global, Local, Scope},
         sub::Sub,
     },
 };
+
+pub fn check_expr(
+    expr: &mut Expr,
+    typ: &Type,
+    global: &Global,
+    local: &mut Local,
+    scope: &Scope,
+) -> Result<(), Error> {
+    match (expr, &typ.kind) {
+        (expr, TypeKind::Any(existential)) => {
+            let span = expr.span();
+            let existential_unif = local.fresh(span);
+            let mut sub = Sub::default();
+            sub.set_generic(existential.clone(), existential_unif.clone());
+            let mut inner_type = typ.children[0].clone();
+            sub.typ(&mut inner_type);
+            check_expr(expr, &inner_type, global, local, scope)?;
+            let meta = Some(AnyMeta {
+                result: typ.clone(),
+                existential: existential_unif.clone(),
+            });
+            *expr = Expr::Any(Box::new(expr.clone()), meta, span);
+        }
+        (expr, _) => {
+            infer_expr(expr, global, local, scope)?;
+            local.unify(typ.clone(), expr.get_type(), typ.span)?;
+        }
+    }
+    Ok(())
+}
 
 pub fn infer_expr(
     expr: &mut Expr,
@@ -18,24 +48,23 @@ pub fn infer_expr(
         Expr::Var(name, typ, span) => {
             *typ = Some(scope.get_var(name, *span)?.clone());
         }
-        Expr::Func(struct_name, func_name, meta, span) => {
-            let strukt = global.get_struct(struct_name, *span)?;
-            let func = strukt
-                .funcs
-                .get(&FuncSpec::named(func_name.to_owned()))
-                .ok_or_else(|| Error::UnknownName(func_name.to_string(), *span))?;
-            let (struct_generics, mut generic_sub) = instantiate(&strukt.generics, local, *span);
-            let func_generics = instantiate_into(&strukt.generics, &mut generic_sub, local, *span);
+        Expr::Func(path, func_name, meta, span) => {
+            let func = global.get_func(path, func_name)?;
+            let (func_generics, generic_sub) = instantiate(&func.generics, local, *span);
             let result_type = if func.is_cor {
-                let mut cor_generics = struct_generics.clone();
-                cor_generics.extend(func_generics.clone());
-                Type::named(cor_name(&strukt.name, &func.name), cor_generics, *span)
+                Type::named(
+                    path.clone(),
+                    cor_name(func_name),
+                    func_generics.clone(),
+                    *span,
+                )
             } else {
                 func.result.clone()
             };
-            let mut func_type = Type::func(func.arg_types(), result_type, *span);
+            let mut func_type =
+                Type::func(func.generics.clone(), func.arg_types(), result_type, *span);
             generic_sub.typ(&mut func_type);
-            *meta = Some((func_type, struct_generics, func_generics));
+            *meta = Some((func_type, func_generics));
         }
         Expr::Literal(literal, typ) => match literal {
             Literal::Bool(_, span) => *typ = Some(Type::bool(*span)),
@@ -56,9 +85,18 @@ pub fn infer_expr(
                     if !local.is_cor() {
                         return Err(Error::AwaitOutsideCor(*span));
                     }
-                    let awaited = local.fresh(*span);
-                    local.unify_await(args[0].get_type(), awaited.clone(), *span);
-                    awaited
+                    let TypeKind::Named(path, name) = args[0].get_type().kind else {
+                        let span = *span;
+                        return Err(Error::NeedsTypeAnnotation(expr.clone(), span));
+                    };
+                    let cor_result = global.get_cor(&path, &name)?;
+                    let mut sub = Sub::default();
+                    for (name, typ) in cor_result.generics.iter().zip(args[0].get_type().children) {
+                        sub.set_generic(name.clone(), typ.clone());
+                    }
+                    let mut cor_type = cor_result.result.clone();
+                    sub.typ(&mut cor_type);
+                    cor_type
                 }
                 Op::Yield => {
                     if !local.is_cor() {
@@ -68,19 +106,17 @@ pub fn infer_expr(
                 }
                 Op::Ref => {
                     ensure_lvalue(&args[0], *span)?;
-                    Type::named("Ptr".into(), vec![args[0].get_type()], *span)
+                    Type::ptr(args[0].get_type(), *span)
                 }
                 Op::Deref => {
                     let result = local.fresh(*span);
                     let arg_type = args[0].get_type();
-                    if let TypeKind::Named(name) = &arg_type.kind {
-                        if name == "Ptr" {
-                            *typ = Some(arg_type.children[0].clone());
-                            return Ok(());
-                        }
-                    }
-                    local.unify(arg_type, Type::ptr(result.clone(), *span), *span);
-                    result
+                    let TypeKind::Primitive(Prim::Ptr) = &arg_type.kind else {
+                        let span = *span;
+                        return Err(Error::NeedsTypeAnnotation(expr.clone(), span));
+                    };
+
+                    arg_type.children[0].clone()
                 }
                 Op::If => {
                     local.unify(Type::bool(*span), args[0].get_type(), *span);
@@ -95,9 +131,13 @@ pub fn infer_expr(
                 Op::SliceIndex => {
                     let result = local.fresh(*span);
                     let arg_type = args[0].get_type();
-                    local.unify(args[1].get_type(), IntType::usize().to_type(*span), *span);
-                    if let TypeKind::Named(name) = &arg_type.kind {
-                        if name == "Slice" {
+                    local.unify(
+                        args[1].get_type(),
+                        Type::int(IntType::usize(), *span),
+                        *span,
+                    );
+                    if let TypeKind::Named(path, name) = &arg_type.kind {
+                        if path.path.is_empty() && name == "Slice" {
                             *typ = Some(arg_type.children[0].clone());
                             return Ok(());
                         }
@@ -121,34 +161,47 @@ pub fn infer_expr(
                     local.unify(args[1].get_type(), Type::bool(*span), *span);
                     Type::bool(*span)
                 }
+                Op::Open(meta) => {
+                    let mut inner_type = args[0].get_type();
+                    let TypeKind::Any(name) = inner_type.kind.clone() else {
+                        let span = *span;
+                        return Err(Error::BadOpen(expr.clone(), span));
+                    };
+                    let skolemized = local.skolem(name.clone(), *span);
+                    let TypeKind::Generic(_, id) = &skolemized.kind else {
+                        unreachable!()
+                    };
+                    let id = *id;
+                    let mut sub = Sub::default();
+                    sub.set_generic(name.clone(), skolemized);
+                    sub.typ(&mut inner_type);
+                    *meta = Some((name, id));
+                    inner_type
+                }
             });
         }
         Expr::Call(func, args, meta, span) => {
-            let arg_types: Vec<_> = args
-                .iter_mut()
-                .map(|arg| {
-                    infer_expr(arg, global, local, scope)?;
-                    Ok(arg.get_type())
-                })
-                .collect::<Result<_, _>>()?;
             infer_expr(func, global, local, scope)?;
 
             let func_type = func.get_type();
 
-            let result_type = if let TypeKind::Func = func_type.kind {
-                for (expected, arg_type) in func_type.children.iter().zip(arg_types) {
-                    local.unify(arg_type, expected.clone(), *span);
-                }
-                func_type.children.last().unwrap().clone()
-            } else {
-                let result_type = local.fresh(*span);
-                local.unify(
-                    Type::func(arg_types, result_type.clone(), *span),
-                    func.get_type(),
-                    *span,
-                );
-                result_type
+            let TypeKind::Func(generic_names) = &func_type.kind else {
+                let span = *span;
+                return Err(Error::NeedsTypeAnnotation(expr.clone(), span));
             };
+
+            let mut sub = Sub::default();
+            for name in generic_names {
+                sub.set_generic(name.clone(), local.fresh(*span));
+            }
+
+            for (mut expected, arg) in func_type.children.iter().cloned().zip(args.iter_mut()) {
+                sub.typ(&mut expected);
+                check_expr(arg, &expected, global, local, scope)?;
+            }
+            let mut result_type = func_type.children.last().unwrap().clone();
+            sub.typ(&mut result_type);
+
             *meta = Some(result_type);
         }
         Expr::Block(stmts, result, span) => {
@@ -179,10 +232,13 @@ pub fn infer_expr(
         Expr::Field(struct_expr, field_name, typ, span) => {
             infer_expr(struct_expr, global, local, scope)?;
             let struct_type = struct_expr.get_type();
-            let TypeKind::Named(struct_name) = &struct_type.kind else {
-                return Err(Error::NeedsTypeAnnotation(struct_expr.clone(), *span));
+            let TypeKind::Named(struct_path, struct_name) = &struct_type.kind else {
+                return Err(Error::NeedsTypeAnnotation(
+                    struct_expr.as_ref().clone(),
+                    *span,
+                ));
             };
-            let strukt = global.get_struct(struct_name, *span)?;
+            let strukt = global.get_struct(struct_path, struct_name)?;
             let mut generic_sub = Sub::default();
             for (name, typ) in strukt.generics.iter().zip(&struct_type.children) {
                 generic_sub.set_generic(name.clone(), typ.clone());
@@ -224,76 +280,9 @@ pub fn infer_expr(
                 }
             }
         }
-        Expr::MethodCall(struct_expr, method_name, args, _, span) => {
-            println!("In method call of {method_name}");
-            for arg in args.iter_mut() {
-                infer_expr(arg, global, local, scope)?;
-            }
-            infer_expr(struct_expr, global, local, scope)?;
-            let struct_type = struct_expr.get_type();
-            let TypeKind::Named(struct_name) = struct_type.kind else {
-                return Err(Error::NeedsTypeAnnotation(struct_expr.clone(), *span));
-            };
-            let strukt = global.get_struct(&struct_name, *span)?;
-            let Some(func) = strukt.funcs.get(&FuncSpec::named(method_name.to_owned())) else {
-                return Err(Error::UnknownName(method_name.clone(), *span));
-            };
-            println!("Found method struct {strukt:?}");
-            let mut generic_sub = Sub::default();
-            let struct_generics = struct_type.children.clone();
-            for (name, typ) in strukt.generics.iter().zip(&struct_generics) {
-                generic_sub.set_generic(name.clone(), typ.clone());
-            }
-            let mut func_generics = Vec::new();
-            for name in func.generics.iter() {
-                let typ = local.fresh(*span);
-                func_generics.push(typ.clone());
-                generic_sub.set_generic(name.clone(), typ);
-            }
-            println!("Built generic sub {generic_sub:?}");
-
-            let mut result_type = if func.is_cor {
-                let mut cor_generics = struct_generics.clone();
-                cor_generics.extend(func_generics.clone());
-                Type::named(cor_name(&strukt.name, &func.name), cor_generics, *span)
-            } else {
-                func.result.clone()
-            };
-            let mut arg_types = func.arg_types();
-            arg_types.iter_mut().for_each(|typ| generic_sub.typ(typ));
-            generic_sub.typ(&mut result_type);
-            let func_type = Type::func(arg_types.clone(), result_type.clone(), *span);
-
-            let func_expr = Expr::Func(
-                struct_name.clone(),
-                method_name.clone(),
-                Some((func_type, struct_generics, func_generics)),
-                *span,
-            );
-
-            let should_ref = arg_types[0].is_ptr() && !struct_expr.get_type().is_ptr();
-
-            let mut args = args.clone(); // TODO: check if the first arg needs to be an lvalue
-            args.insert(
-                0,
-                if should_ref {
-                    ensure_lvalue(&struct_expr, *span)?;
-                    Expr::Op(
-                        Op::Ref,
-                        vec![struct_expr.as_ref().clone()],
-                        Some(Type::ptr(struct_expr.get_type(), *span)),
-                        *span,
-                    )
-                } else {
-                    struct_expr.as_ref().clone()
-                },
-            );
-
-            for (actual, expected) in args.iter().zip(arg_types) {
-                local.unify(actual.get_type(), expected, *span);
-            }
-
-            *expr = Expr::Call(Box::new(func_expr), args, Some(result_type.clone()), *span);
+        Expr::Any(_, _, span) => {
+            let span = *span;
+            return Err(Error::NeedsTypeAnnotation(expr.clone(), span));
         }
     }
 

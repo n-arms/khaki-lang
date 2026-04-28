@@ -18,7 +18,6 @@ use crate::{
         text::{LlvmVals, Text},
     },
     ir::{BlockId, End, Func, Slot, Value},
-    typing::Spec,
 };
 
 // calculate all the slots that need to be saved / restored over await points

@@ -1,45 +1,57 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    ast::{Span, Struct, Type, TypeKind},
+    ast::{IntType, Path, Prim, Span, Struct, Type, TypeKind},
     typing::{
         Error,
-        solve::{self, CorResult, Rule},
+        sig::{FuncDef, ModuleSig},
+        solve::{CorResult, unify},
         sub::Sub,
     },
 };
 
 pub struct Global {
-    structs: HashMap<String, Struct>,
+    sigs: HashMap<Vec<String>, ModuleSig>,
 }
 
 impl Global {
-    pub fn from_program(structs: impl IntoIterator<Item = Struct>) -> Self {
-        Self {
-            structs: structs
-                .into_iter()
-                .map(|strukt| (strukt.name.clone(), strukt))
-                .collect(),
-        }
+    pub fn new(sigs: HashMap<Vec<String>, ModuleSig>) -> Self {
+        Self { sigs }
     }
-
-    pub fn get_struct(&self, name: &str, span: Span) -> Result<&Struct, Error> {
+    fn get_module(&self, path: &Path) -> Result<&ModuleSig, Error> {
+        self.sigs
+            .get(&path.path)
+            .ok_or_else(|| Error::UnknownPath(path.clone()))
+    }
+    pub fn get_struct(&self, path: &Path, name: &str) -> Result<&Struct, Error> {
         let strukt = self
+            .get_module(path)?
             .structs
             .get(name)
-            .ok_or_else(|| Error::UnknownName(name.to_string(), span))?;
+            .ok_or_else(|| Error::UnknownName(name.to_owned(), path.span))?;
         Ok(strukt)
     }
-
-    pub fn set_struct(&mut self, strukt: Struct) {
-        self.structs.insert(strukt.name.clone(), strukt);
+    pub fn get_func(&self, path: &Path, name: &str) -> Result<&FuncDef, Error> {
+        let func = self
+            .get_module(path)?
+            .func_defs
+            .get(name)
+            .ok_or_else(|| Error::UnknownName(name.to_owned(), path.span))?;
+        Ok(func)
+    }
+    pub fn get_cor(&self, path: &Path, name: &str) -> Result<&CorResult, Error> {
+        self.get_module(path)?
+            .cor_defs
+            .get(name)
+            .ok_or_else(|| Error::UnknownName(name.to_owned(), path.span))
     }
 }
 
 pub struct Local {
     next_unif: usize,
-    rules: Vec<Rule>,
+    sub: Sub,
     unifs: HashSet<usize>,
+    ints: Vec<(Type, Span)>,
     is_cor: bool,
 }
 
@@ -47,8 +59,9 @@ impl Local {
     pub fn new(is_cor: bool) -> Self {
         Self {
             next_unif: 0,
-            rules: Vec::new(),
+            sub: Sub::default(),
             unifs: HashSet::new(),
+            ints: Vec::new(),
             is_cor,
         }
     }
@@ -64,28 +77,53 @@ impl Local {
         }
     }
 
-    pub fn unify(&mut self, a: Type, b: Type, span: Span) {
-        self.rules.push(Rule::Unify(a, b, span));
+    pub fn skolem(&mut self, name: impl Into<String>, span: Span) -> Type {
+        let id = self.next_unif;
+        self.next_unif += 1;
+        Type::skolem(name, id, span)
     }
 
-    pub fn unify_await(&mut self, cor_type: Type, await_type: Type, span: Span) {
-        self.rules.push(Rule::UnifyAwait {
-            cor_type,
-            await_type,
-            span,
-        })
+    pub fn unify(&mut self, mut a: Type, mut b: Type, span: Span) -> Result<(), Error> {
+        self.apply_type(&mut a);
+        self.apply_type(&mut b);
+        unify(&a, &b, span, &mut self.unifs, &mut self.sub)
     }
 
-    pub fn solve(self, cor_list: &HashMap<String, CorResult>, span: Span) -> Result<Sub, Error> {
-        solve::solve(self.rules, &self.unifs, cor_list, span)
+    pub fn apply_type(&self, typ: &mut Type) {
+        self.sub.typ(typ);
+    }
+
+    pub fn solve(mut self, span: Span) -> Result<Sub, Error> {
+        // All we need to do here is:
+        // 1. Instatiate all the unknown unifs
+        // 2. Check that all the integer unifs have been instaniated to integer types
+        let isize_type = Type::int(IntType::isize(), span);
+        while let Some(typ) = self.unifs.iter().next().copied() {
+            self.unify(
+                Type {
+                    kind: TypeKind::Unif(typ),
+                    span,
+                    children: vec![],
+                },
+                isize_type.clone(),
+                span,
+            )?;
+        }
+        for (mut typ, span) in self.ints.drain(0..) {
+            self.sub.typ(&mut typ);
+            if !matches!(typ.kind, TypeKind::Primitive(Prim::Int(..))) {
+                return Err(Error::BadInt(typ.clone(), span));
+            }
+        }
+        Ok(self.sub)
     }
 
     pub fn is_cor(&self) -> bool {
         self.is_cor
     }
 
-    pub fn unify_int(&mut self, int: Type, span: Span) {
-        self.rules.push(Rule::UnifyInt(int, span));
+    pub fn unify_int(&mut self, typ: Type, span: Span) {
+        self.ints.push((typ, span));
     }
 }
 

@@ -1,10 +1,8 @@
 use std::{collections::HashMap, fs};
 
 use crate::{
-    ast::{Expr, Func, FuncSpec, IntType, Op, Span, Struct, Type},
+    ast::{Expr, Func, IntType, Op, Span, Struct, Type},
     derive::{derive_constructors, derive_cor_structs},
-    emit::emit_program,
-    lower::lower_program,
     ord_map::OrdMap,
     parser::{parse_program, scan_program},
     typing::type_program,
@@ -12,7 +10,6 @@ use crate::{
 
 mod ast;
 mod derive;
-mod emit;
 mod ir;
 mod lower;
 mod ord_map;

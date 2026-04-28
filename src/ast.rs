@@ -1,5 +1,8 @@
 use core::{fmt, hash};
-use std::collections::HashMap;
+use std::{
+    collections::{HashMap, HashSet},
+    hash::Hash,
+};
 
 use crate::ord_map::OrdMap;
 
@@ -13,19 +16,41 @@ pub struct Span {
     pub file_id: FileId,
 }
 
-#[derive(Clone, PartialEq, Eq, Hash, Debug)]
-pub struct FuncSpec {
-    pub func_name: String,
-    pub generics: Vec<Type>,
+#[derive(Clone, Debug)]
+pub struct Path {
+    pub path: Vec<String>,
+    pub span: Span,
 }
 
-impl FuncSpec {
-    pub fn named(name: String) -> Self {
-        Self {
-            func_name: name,
-            generics: Vec::new(),
-        }
+impl Path {
+    pub fn new(path: Vec<String>, span: Span) -> Self {
+        Self { path, span }
     }
+    pub fn with(&self, name: String, span: Span) -> Self {
+        let mut path = self.path.clone();
+        path.push(name);
+        Self::new(path, span)
+    }
+}
+
+impl PartialEq for Path {
+    fn eq(&self, other: &Self) -> bool {
+        self.path == other.path
+    }
+}
+
+impl Eq for Path {}
+
+impl Hash for Path {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.path.hash(state);
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Module {
+    pub structs: HashMap<String, Struct>,
+    pub funcs: HashMap<String, Func>,
 }
 
 #[derive(Clone, Debug)]
@@ -33,7 +58,6 @@ pub struct Struct {
     pub name: String,
     pub generics: Vec<String>,
     pub fields: OrdMap<String, Type>,
-    pub funcs: HashMap<FuncSpec, Func>,
     pub span: Span,
 }
 
@@ -51,10 +75,23 @@ impl Func {
     pub fn arg_types(&self) -> Vec<Type> {
         self.args.iter().map(|(_, typ)| typ.clone()).collect()
     }
+
+    pub fn result_type(&self, path: &Path) -> Type {
+        if self.is_cor {
+            let generics = self
+                .generics
+                .iter()
+                .map(|generic| Type::generic(generic.clone(), self.result.span))
+                .collect();
+            Type::named(path.clone(), self.name.clone(), generics, self.result.span)
+        } else {
+            self.result.clone()
+        }
+    }
 }
 
-pub fn cor_name(strukt: &str, func: &str) -> String {
-    format!("{strukt}_{func}")
+pub fn cor_name(func: &str) -> String {
+    format!("Cor_{func}")
 }
 
 pub fn constructor_name(strukt: &str) -> String {
@@ -84,22 +121,41 @@ impl PartialEq for Type {
 impl fmt::Debug for Type {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.kind {
-            TypeKind::Func => {
-                let mut tuple = f.debug_tuple("FuncType");
-                for child in &self.children {
-                    tuple.field(child);
+            TypeKind::Func(generics) => {
+                let mut name = String::from("FuncType");
+                if !generics.is_empty() {
+                    name += "[ ";
+                    for generic in generics {
+                        name += generic;
+                        name += " ";
+                    }
+                    name += "]";
                 }
-                tuple.finish()
-            }
-            TypeKind::Named(name) => {
                 let mut tuple = f.debug_tuple(&name);
                 for child in &self.children {
                     tuple.field(child);
                 }
                 tuple.finish()
             }
+            TypeKind::Any(any) => {
+                write!(f, "any[{any}] {:?}", self.children[0])
+            }
+            TypeKind::Named(path, name) => {
+                let mut tuple = f.debug_tuple(&format!("{name:?}"));
+                for child in &self.children {
+                    tuple.field(child);
+                }
+                tuple.finish()
+            }
+            TypeKind::Primitive(prim) => write!(f, "{prim:?}"),
             TypeKind::Unif(u) => write!(f, "unif{u}"),
-            TypeKind::Generic(name) => write!(f, "{name}"),
+            TypeKind::Generic(name, unif) => {
+                if *unif == 0 {
+                    write!(f, "{name}")
+                } else {
+                    write!(f, "{name}#{unif}")
+                }
+            }
             TypeKind::Array(size) => write!(f, "[{:?} x {size}]", self.children[0]),
         }
     }
@@ -107,6 +163,7 @@ impl fmt::Debug for Type {
 
 impl Eq for Type {}
 
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct IntType {
     width: usize,
     signed: bool,
@@ -145,66 +202,54 @@ impl IntType {
     pub fn width(&self) -> usize {
         self.width
     }
-    pub fn to_type(&self, span: Span) -> Type {
-        Type::named(
-            format!("{}{}", if self.signed { "I" } else { "U" }, self.width),
-            vec![],
-            span,
-        )
-    }
-    pub fn from_type(typ: &Type) -> Option<Self> {
-        let TypeKind::Named(name) = &typ.kind else {
-            return None;
-        };
-        let first = name.chars().next()?;
-        let signed = match first {
-            'I' => true,
-            'U' => false,
-            _ => return None,
-        };
-        let width = name[1..].parse().ok()?;
-        Some(Self { width, signed })
-    }
 }
 
 impl Type {
     pub fn bool(span: Span) -> Type {
         Type {
-            kind: TypeKind::Named("Bool".into()),
+            kind: TypeKind::Primitive(Prim::Bool),
             span,
             children: Vec::new(),
         }
     }
 
-    pub fn named(name: String, generics: Vec<Type>, span: Span) -> Self {
+    pub fn named(path: Path, name: String, generics: Vec<Type>, span: Span) -> Self {
         Self {
-            kind: TypeKind::Named(name),
+            kind: TypeKind::Named(path, name),
             span,
             children: generics,
         }
     }
 
     pub fn generic(name: impl Into<String>, span: Span) -> Self {
+        Self::skolem(name, 0, span)
+    }
+
+    pub fn skolem(name: impl Into<String>, id: usize, span: Span) -> Self {
         Self {
-            kind: TypeKind::Generic(name.into()),
+            kind: TypeKind::Generic(name.into(), id),
             span,
             children: Vec::new(),
         }
     }
 
     pub fn ptr(typ: Type, span: Span) -> Self {
-        Self::named("Ptr".into(), vec![typ], span)
+        Self {
+            kind: TypeKind::Primitive(Prim::Ptr),
+            children: vec![typ],
+            span,
+        }
     }
 
     pub fn slice(typ: Type, span: Span) -> Self {
-        Self::named("Slice".into(), vec![typ], span)
+        Self::named(Path::new(vec![], span), "Slice".into(), vec![typ], span)
     }
 
-    pub fn func(args: Vec<Type>, result: Type, span: Span) -> Type {
+    pub fn func(generics: Vec<String>, args: Vec<Type>, result: Type, span: Span) -> Type {
         let mut children = args;
         children.push(result);
         Type {
-            kind: TypeKind::Func,
+            kind: TypeKind::Func(generics),
             span,
             children,
         }
@@ -220,28 +265,50 @@ impl Type {
 
     pub fn unit(span: Span) -> Type {
         Type {
-            kind: TypeKind::Named("Unit".into()),
+            kind: TypeKind::Primitive(Prim::Unit),
             span,
             children: Vec::new(),
         }
     }
 
-    pub fn is_ptr(&self) -> bool {
-        if let TypeKind::Named(name) = &self.kind {
-            name == "Ptr"
-        } else {
-            false
+    pub fn int(typ: IntType, span: Span) -> Self {
+        Self {
+            kind: TypeKind::Primitive(Prim::Int(typ)),
+            span,
+            children: Vec::new(),
         }
+    }
+
+    pub fn unifs(&self) -> HashSet<usize> {
+        let mut unifs: HashSet<_> = self
+            .children
+            .iter()
+            .flat_map(|child| child.unifs())
+            .collect();
+        if let TypeKind::Unif(unif) = &self.kind {
+            unifs.insert(*unif);
+        }
+        unifs
     }
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum TypeKind {
-    Func,
-    Named(String),
+    Func(Vec<String>),
+    Any(String),
+    Named(Path, String),
+    Primitive(Prim),
     Unif(usize),
-    Generic(String),
+    Generic(String, usize),
     Array(usize),
+}
+
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub enum Prim {
+    Int(IntType),
+    Bool,
+    Unit,
+    Ptr,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -257,8 +324,9 @@ pub enum Op {
     If,
     While,
     Constructor(String),
-    // Slice[t], Int, t
+    // (Slice[t], Int) -> t
     SliceIndex,
+    Open(Option<(String, usize)>),
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -296,15 +364,21 @@ pub enum Logic {
 #[derive(Clone, Debug)]
 pub enum Expr {
     Var(String, Option<Type>, Span),
-    /// all functions are of the form `struct[generics].func()`
-    Func(String, String, Option<(Type, Vec<Type>, Vec<Type>)>, Span),
+    /// all functions are of the form path.func(args)
+    Func(Path, String, Option<(Type, Vec<Type>)>, Span),
     Literal(Literal, Option<Type>),
     Op(Op, Vec<Expr>, Option<Type>, Span),
     Call(Box<Expr>, Vec<Expr>, Option<Type>, Span),
     Block(Vec<Stmt>, Option<Box<Expr>>, Span),
     Field(Box<Expr>, String, Option<(Type, usize)>, Span),
-    MethodCall(Box<Expr>, String, Vec<Expr>, Option<Type>, Span),
     Array(usize, Option<Vec<Expr>>, Option<Type>, Span),
+    Any(Box<Expr>, Option<AnyMeta>, Span),
+}
+
+#[derive(Clone, Debug)]
+pub struct AnyMeta {
+    pub result: Type,
+    pub existential: Type,
 }
 
 #[derive(Clone, Debug)]
@@ -320,7 +394,6 @@ impl Expr {
             Expr::Var(_, typ, _)
             | Expr::Literal(_, typ)
             | Expr::Op(_, _, typ, _)
-            | Expr::MethodCall(_, _, _, typ, _)
             | Expr::Call(_, _, typ, _) => typ.clone().unwrap(),
             Expr::Func(_, _, meta, _) => meta.as_ref().unwrap().0.clone(),
             Expr::Field(_, _, meta, _) => meta.clone().unwrap().0,
@@ -332,6 +405,23 @@ impl Expr {
                 }
             }
             Expr::Array(_, _, elem_type, span) => Type::slice(elem_type.clone().unwrap(), *span),
+            Expr::Any(_, _, meta) => meta.as_ref().unwrap().result.clone(),
+        }
+    }
+
+    pub fn span(&self) -> Span {
+        match self {
+            Expr::Var(_, _, span)
+            | Expr::Func(_, _, _, span)
+            | Expr::Op(_, _, _, span)
+            | Expr::Call(_, _, _, span)
+            | Expr::Block(_, _, span)
+            | Expr::Field(_, _, _, span)
+            | Expr::Array(_, _, _, span)
+            | Expr::Any(_, _, span) => *span,
+            Expr::Literal(literal, _) => match literal {
+                Literal::Bool(_, span) | Literal::Number(_, span) | Literal::Unit(span) => *span,
+            },
         }
     }
 }

@@ -1,8 +1,10 @@
 use std::collections::HashMap;
 
+use chumsky::container::Seq;
+
 use crate::ast::{Expr, Func, Span, Stmt, Struct, Type, TypeKind};
 
-#[derive(Default, Debug)]
+#[derive(Clone, Default, Debug)]
 pub struct Sub {
     pub generics: HashMap<String, Type>,
     pub unifs: HashMap<usize, Type>,
@@ -33,12 +35,12 @@ impl Sub {
         }
     }
 
-    fn generic(&self, generic: &str, span: Span) -> Type {
+    fn generic(&self, generic: &str, id: usize, span: Span) -> Type {
         if let Some(typ) = self.generics.get(generic) {
             typ.clone()
         } else {
             Type {
-                kind: TypeKind::Generic(generic.to_string()),
+                kind: TypeKind::Generic(generic.to_string(), id),
                 span,
                 children: Vec::new(),
             }
@@ -46,14 +48,32 @@ impl Sub {
     }
 
     pub fn typ(&self, typ: &mut Type) {
+        if let TypeKind::Func(generics) = &typ.kind {
+            let mut inner = self.clone();
+            inner.generics.retain(|name, _| !generics.contains(name));
+            for child in &mut typ.children {
+                inner.typ(child);
+            }
+            return;
+        } else if let TypeKind::Any(generic) = &typ.kind {
+            let mut inner = self.clone();
+            inner.generics.retain(|name, _| name != generic);
+            for child in &mut typ.children {
+                inner.typ(child);
+            }
+            return;
+        }
         for child in &mut typ.children {
             self.typ(child);
         }
         match &mut typ.kind {
-            TypeKind::Func => {}
-            TypeKind::Named(_) => {}
+            TypeKind::Func(_) | TypeKind::Any(_) => {
+                unreachable!()
+            }
+            TypeKind::Primitive(..) => {}
+            TypeKind::Named(..) => {}
             TypeKind::Unif(unif) => *typ = self.unif(*unif, typ.span),
-            TypeKind::Generic(name) => *typ = self.generic(name, typ.span),
+            TypeKind::Generic(name, id) => *typ = self.generic(name, *id, typ.span),
             TypeKind::Array(_) => {}
         }
     }
@@ -71,9 +91,9 @@ impl Sub {
                 }
             }
             Expr::Func(_, _, meta, _) => {
-                if let Some((typ, struct_generics, func_generics)) = meta.as_mut() {
+                if let Some((typ, generics)) = meta.as_mut() {
                     self.typ(typ);
-                    for typ in struct_generics.iter_mut().chain(func_generics.iter_mut()) {
+                    for typ in generics.iter_mut() {
                         self.typ(typ);
                     }
                 }
@@ -95,7 +115,7 @@ impl Sub {
                     self.typ(typ);
                 }
             }
-            Expr::Block(stmts, result, span) => {
+            Expr::Block(stmts, result, _) => {
                 for stmt in stmts {
                     match stmt {
                         Stmt::Set(_, val) | Stmt::Expr(val) | Stmt::Let(_, val) => self.expr(val),
@@ -105,21 +125,19 @@ impl Sub {
                     self.expr(result);
                 }
             }
-            Expr::MethodCall(expr, _, args, typ, _) => {
-                self.expr(expr);
-                for arg in args {
-                    self.expr(arg);
-                }
-                if let Some(typ) = typ {
-                    self.typ(typ)
-                }
-            }
-            Expr::Array(size, elems, elem_type, span) => {
+            Expr::Array(_, elems, elem_type, _) => {
                 for elem in elems.iter_mut().flatten() {
                     self.expr(elem);
                 }
                 if let Some(typ) = elem_type {
                     self.typ(typ);
+                }
+            }
+            Expr::Any(inner, meta, _) => {
+                self.expr(inner);
+                if let Some(meta) = meta {
+                    self.typ(&mut meta.result);
+                    self.typ(&mut meta.existential);
                 }
             }
         }
@@ -136,10 +154,6 @@ impl Sub {
     pub fn strukt(&self, strukt: &mut Struct) {
         for typ in strukt.fields.values_mut() {
             self.typ(typ);
-        }
-
-        for func in strukt.funcs.values_mut() {
-            self.func(func);
         }
     }
 }

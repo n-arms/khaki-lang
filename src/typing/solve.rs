@@ -1,134 +1,16 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use crate::{
-    ast::{IntType, Span, Type, TypeKind},
+    ast::{Span, Type, TypeKind},
     typing::{Error, sub::Sub},
 };
 
-#[derive(Clone, Debug)]
-pub enum Rule {
-    Unify(Type, Type, Span),
-    UnifyAwait {
-        cor_type: Type,
-        await_type: Type,
-        span: Span,
-    },
-    UnifyInt(Type, Span),
-}
-
 pub struct CorResult {
     pub generics: Vec<String>,
-    pub func_generics: Vec<String>,
     pub result: Type,
 }
 
-impl Rule {
-    /// returns Ok(true) if rule is solved, Ok(false) if it can be solved later but not now, Err if it failed.
-    fn try_solve(
-        &mut self,
-        sub: &mut Sub,
-        cor_list: &HashMap<String, CorResult>,
-        unifs: &mut HashSet<usize>,
-    ) -> Result<bool, Error> {
-        match self {
-            Rule::Unify(a, b, span) => {
-                sub.typ(a);
-                sub.typ(b);
-                unify(a, b, *span, unifs, sub)?;
-                Ok(true)
-            }
-            Rule::UnifyAwait {
-                cor_type,
-                await_type,
-                span,
-            } => {
-                sub.typ(cor_type);
-                sub.typ(await_type);
-                let cor_name = match &cor_type.kind {
-                    TypeKind::Func | TypeKind::Array(..) => {
-                        return Err(Error::BadAwait(cor_type.clone(), *span));
-                    }
-                    TypeKind::Named(name) => name,
-                    TypeKind::Unif(_) => return Ok(false),
-                    TypeKind::Generic(g) => unreachable!("Unbound generic unif{g}"),
-                };
-
-                let cor_result = cor_list
-                    .get(cor_name)
-                    .ok_or_else(|| Error::UnknownName(cor_name.clone(), *span))?;
-
-                let mut generic_sub = Sub::default();
-                for (name, typ) in cor_result.generics.iter().zip(&cor_type.children) {
-                    generic_sub.set_generic(name.clone(), typ.clone());
-                }
-                let mut result_type = cor_result.result.clone();
-                generic_sub.typ(&mut result_type);
-
-                unify(&result_type, await_type, *span, unifs, sub)?;
-
-                Ok(true)
-            }
-            Rule::UnifyInt(int_type, span) => {
-                sub.typ(int_type);
-                match &int_type.kind {
-                    TypeKind::Func | TypeKind::Array(_) => {
-                        return Err(Error::BadInt(int_type.clone(), *span));
-                    }
-                    TypeKind::Named(..) => {}
-                    TypeKind::Unif(_) => return Ok(false),
-                    TypeKind::Generic(g) => unreachable!("Unbound generic {g}"),
-                };
-                if let Some(_) = IntType::from_type(&int_type) {
-                    Ok(true)
-                } else {
-                    Err(Error::BadInt(int_type.clone(), *span))
-                }
-            }
-        }
-    }
-}
-
-pub fn solve(
-    mut rules: Vec<Rule>,
-    unifs: &HashSet<usize>,
-    cor_list: &HashMap<String, CorResult>,
-    span: Span,
-) -> Result<Sub, Error> {
-    let mut sub = Sub::default();
-    let mut unifs = unifs.clone();
-
-    while rules.iter().any(|rule| !matches!(rule, Rule::UnifyInt(..))) {
-        let mut changed = false;
-        for i in (0..rules.len()).rev() {
-            let rule = &mut rules[i];
-            if rule.try_solve(&mut sub, cor_list, &mut unifs)? {
-                changed = true;
-                rules.remove(i);
-            }
-        }
-        if !changed {
-            return Err(Error::TypeSolverStuck(rules.clone()));
-        }
-    }
-
-    println!("before solving unconstrained unifs: {sub:?}");
-
-    for unif in unifs {
-        bind(
-            unif,
-            IntType::isize().to_type(span),
-            span,
-            &mut HashSet::new(),
-            &mut sub,
-        )?;
-    }
-
-    println!("after constraining: {sub:?}");
-
-    Ok(sub)
-}
-
-fn unify(
+pub fn unify(
     a: &Type,
     b: &Type,
     span: Span,
@@ -142,9 +24,12 @@ fn unify(
         }
     }
     match (&a.kind, &b.kind) {
-        (Func, Func) => {}
-        (Named(a), Named(b)) if a == b => {}
-        (Generic(a), Generic(b)) if a == b => {}
+        // TODO: support structural function/any type unification (ie should be able to unify `fn[T](T): T` and `fn[L](L): L`, or `any[T] T` and `any[L] L`)
+        (Func(g1), Func(g2)) if g1 == g2 => {}
+        (Any(g1), Any(g2)) if g1 == g2 => {}
+        (Primitive(prim1), Primitive(prim2)) if prim1 == prim2 => {}
+        (Named(path1, name1), Named(path2, name2)) if path1 == path2 && name1 == name2 => {}
+        (Generic(name1, id1), Generic(name2, id2)) if name1 == name2 && id1 == id2 => {}
         (Unif(u), _) => {
             bind(*u, b.clone(), span, unifs, sub)?;
         }

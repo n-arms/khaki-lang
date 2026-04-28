@@ -5,7 +5,6 @@ use crate::{
     derive::CorParts,
     emit::text::{LlvmVals, Text},
     ir::{BlockId, End, Func, Instr, Op, Slot, Struct, Value},
-    typing::Spec,
 };
 
 mod cor;
