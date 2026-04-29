@@ -59,6 +59,10 @@ pub enum TokenKind {
     Bang,
     #[token("yield")]
     Yield,
+    #[token("any")]
+    Any,
+    #[token("open")]
+    Open,
     #[token("&")]
     Ampersand,
     #[token("*")]

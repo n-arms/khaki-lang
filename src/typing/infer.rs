@@ -280,9 +280,8 @@ pub fn infer_expr(
                 }
             }
         }
-        Expr::Any(_, _, span) => {
-            let span = *span;
-            return Err(Error::NeedsTypeAnnotation(expr.clone(), span));
+        Expr::Any(..) => {
+            unreachable!()
         }
     }
 

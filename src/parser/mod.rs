@@ -5,7 +5,7 @@ use chumsky::{
     error::Rich,
     extra::{Full, ParserExtra},
     input::{Input, MapExtra},
-    pratt::{infix, left, postfix},
+    pratt::{prefix, infix, left, postfix},
     prelude::{choice, just, recursive},
     span::SimpleSpan,
 };
@@ -113,7 +113,27 @@ fn module<'a, I: Input<'a, Token = TokenKind, Span = SimpleSpan>>(
             .ignore_then(just(TokenKind::RightSquare))
             .ignore_then(typ.clone())
             .map_with(move |elem, e| Type::slice(elem, get_span(e, file_id)));
-        generic.or(named).or(slice)
+        let any = just(TokenKind::Any)
+            .ignore_then(name(input).delimited_by(just(TokenKind::LeftSquare), just(TokenKind::RightSquare)))
+            .then(typ.clone()).map_with(move |(var, typ), e| Type {
+                kind: TypeKind::Any(var),
+                children: vec![typ],
+                span: get_span(e, file_id)
+            });
+        let func = just(TokenKind::Func)
+            .ignore_then(list(name(input), file_id).delimited_by(just(TokenKind::LeftSquare), just(TokenKind::RightSquare)).or_not().map(|g| g.unwrap_or_default()))
+            .then(list(typ.clone(), file_id).delimited_by(just(TokenKind::LeftParen), just(TokenKind::RightParen)))
+            .then_ignore(just(TokenKind::Colon))
+            .then(typ.clone())
+            .map_with(move |((generics, args), result), e| Type::func(generics, args, result, get_span(e, file_id)));
+
+        let base = generic.or(named).or(slice).or(func).or(any);
+        base.then(just(TokenKind::Star).repeated().collect::<Vec<_>>()).map_with(move |(mut typ, stars), e| {
+            for star in stars {
+                typ = Type::ptr(typ, get_span(e, file_id));
+            }
+            typ
+        })
     });
 
     let expr = {
@@ -293,6 +313,11 @@ fn module<'a, I: Input<'a, Token = TokenKind, Span = SimpleSpan>>(
             let bit_and_op = just(TokenKind::Ampersand)
                 .and_is(just(TokenKind::Ampersand).then(atom_start.clone()));
             base.pratt((
+                prefix(
+                    101,
+                    just(TokenKind::Open),
+                    move |_, inner, e| Expr::Op(Op::Open(None), vec![inner], None, get_span(e, file_id))
+                ),
                 postfix(
                     100,
                     just(TokenKind::Dot).ignore_then(name(input)),
@@ -677,6 +702,22 @@ mod tests {
             func main(): Unit = {
                 let x = Box(3);
                 let y = box::Box(3);
+            }
+        "#;
+        test_parse(source);
+    }
+
+    #[test]
+    fn any_open() {
+        let source = r#"
+            struct Task[t] {
+                state: t*
+                op: func(t): Unit
+            }
+
+            func run_task(task: any[t] Task[t]): Unit = {
+                let inner = open task;
+                (inner.op)(inner.state*)
             }
         "#;
         test_parse(source);
