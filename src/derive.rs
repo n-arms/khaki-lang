@@ -28,7 +28,8 @@ pub fn derive_constructors(module_path: Path, module: &mut Module) {
             })
             .unzip();
         let result = Type::named(
-            module_path.with(strukt.name.clone(), span),
+            module_path.clone(),
+            strukt.name.clone(),
             strukt
                 .generics
                 .iter()
@@ -75,7 +76,8 @@ pub fn derive_cor_structs(module_path: Path, module: &mut Module) -> HashMap<Str
                 .collect();
             let cor_generics = func.generics.clone();
             let cor_type = Type::named(
-                module_path.with(cor_name.clone(), span),
+                module_path.clone(),
+                cor_name.clone(),
                 cor_generic_types.clone(),
                 span,
             );
@@ -94,10 +96,10 @@ pub fn derive_cor_structs(module_path: Path, module: &mut Module) -> HashMap<Str
                 name: cor_name,
                 generics: cor_generics,
                 fields: OrdMap::new(),
-                //funcs: HashMap::from([(FuncSpec::named("poll".to_owned()), cor_func)]),
                 span: func.result.span,
             };
-            structs.push(cor_struct);
+            funcs.push((cor_func.name.clone(), cor_func));
+            structs.push((cor_struct.name.clone(), cor_struct));
         }
     }
 

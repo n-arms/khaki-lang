@@ -109,7 +109,6 @@ pub fn infer_expr(
                     Type::ptr(args[0].get_type(), *span)
                 }
                 Op::Deref => {
-                    let result = local.fresh(*span);
                     let arg_type = args[0].get_type();
                     let TypeKind::Primitive(Prim::Ptr) = &arg_type.kind else {
                         let span = *span;
@@ -119,8 +118,8 @@ pub fn infer_expr(
                     arg_type.children[0].clone()
                 }
                 Op::If => {
-                    local.unify(Type::bool(*span), args[0].get_type(), *span);
-                    local.unify(args[1].get_type(), args[2].get_type(), *span);
+                    local.unify(Type::bool(*span), args[0].get_type(), *span)?;
+                    local.unify(args[1].get_type(), args[2].get_type(), *span)?;
                     args[1].get_type()
                 }
                 Op::While => {
@@ -135,7 +134,7 @@ pub fn infer_expr(
                         args[1].get_type(),
                         Type::int(IntType::usize(), *span),
                         *span,
-                    );
+                    )?;
                     if let TypeKind::Named(path, name) = &arg_type.kind {
                         if path.path.is_empty() && name == "Slice" {
                             *typ = Some(arg_type.children[0].clone());
@@ -261,17 +260,18 @@ pub fn infer_expr(
                 }
                 for pair in elems.windows(2) {
                     let [a, b]: &[Expr; _] = pair.try_into().unwrap();
-                    local.unify(a.get_type(), b.get_type(), *span);
+                    local.unify(a.get_type(), b.get_type(), *span)?;
                 }
                 if let Some(elem_type) = elem_type {
                     if let Some(first) = elems.first() {
-                        local.unify(elem_type.clone(), first.get_type(), *span);
+                        local.unify(elem_type.clone(), first.get_type(), *span)?;
                     }
                 } else {
                     if let Some(first) = elems.first() {
                         *elem_type = Some(first.get_type());
                     } else {
-                        *elem_type = Some(local.fresh(*span));
+                        let span = *span;
+                        return Err(Error::NeedsTypeAnnotation(expr.clone(), span));
                     }
                 }
             } else {

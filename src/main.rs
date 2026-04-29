@@ -57,6 +57,7 @@ fn main() {
     let mut ast = parse_program(source, &tokens, file_id).unwrap();
 
     let span: Span = Span::new(file_id, 0, 0);
+    /*
     let i32_type = IntType::signed(32).to_type(span);
     ast.push(Struct {
         name: "I32".into(),
@@ -193,4 +194,5 @@ fn main() {
     //dbg!(&lowered);
     //let llvm = emit_program(&lowered, &cor_structs);
     //fs::write("out.ll", llvm).unwrap();
+    */
 }

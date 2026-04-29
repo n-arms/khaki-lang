@@ -405,7 +405,7 @@ impl Expr {
                 }
             }
             Expr::Array(_, _, elem_type, span) => Type::slice(elem_type.clone().unwrap(), *span),
-            Expr::Any(_, _, meta) => meta.as_ref().unwrap().result.clone(),
+            Expr::Any(_, meta, _) => meta.as_ref().unwrap().result.clone(),
         }
     }
 

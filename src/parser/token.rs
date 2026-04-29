@@ -23,6 +23,8 @@ pub enum TokenKind {
     Semicolon,
     #[token(":")]
     Colon,
+    #[token("::")]
+    DoubleColon,
     #[token(".")]
     Dot,
     #[regex("[_a-z][A-Za-z0-9_]*")]
