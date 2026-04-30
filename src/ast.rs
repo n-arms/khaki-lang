@@ -140,7 +140,7 @@ impl fmt::Debug for Type {
             TypeKind::Any(any) => {
                 write!(f, "any[{any}] {:?}", self.children[0])
             }
-            TypeKind::Named(path, name) => {
+            TypeKind::Named(_, name) => {
                 let mut tuple = f.debug_tuple(&format!("{name:?}"));
                 for child in &self.children {
                     tuple.field(child);
@@ -163,7 +163,7 @@ impl fmt::Debug for Type {
 
 impl Eq for Type {}
 
-#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub struct IntType {
     width: usize,
     signed: bool,
@@ -201,6 +201,13 @@ impl IntType {
     }
     pub fn width(&self) -> usize {
         self.width
+    }
+
+    pub fn from_type(typ: &Type) -> Option<IntType> {
+        match &typ.kind {
+            TypeKind::Primitive(Prim::Int(int_type)) => Some(*int_type),
+            _ => None,
+        }
     }
 }
 

@@ -61,7 +61,7 @@ fn lower_expr(expr: &ast::Expr, fb: &mut FuncBuilder, env: &Env, global: &Global
             vec![env.get_var(name).clone()],
             *span,
         ),
-        ast::Expr::Func(path, func_name, meta, span) => fb.instr(
+        ast::Expr::Func(path, func_name, _, span) => fb.instr(
             result,
             result_witness,
             ir::Value::Func(path.clone(), func_name.clone()),
@@ -293,8 +293,8 @@ fn lower_expr(expr: &ast::Expr, fb: &mut FuncBuilder, env: &Env, global: &Global
                 )
             }
         }
-        ast::Expr::Field(expr, name, meta, span) => {
-            let (result_type, field_index) = meta.clone().unwrap();
+        ast::Expr::Field(expr, _, meta, span) => {
+            let (_, field_index) = meta.clone().unwrap();
 
             let expr_val = lower_expr(expr, fb, env, global);
 
@@ -433,8 +433,8 @@ pub fn generic_name(name: &str, id: usize) -> String {
 fn lower_witness(typ: &Type, fb: &mut FuncBuilder, env: &Env, global: &Global) -> ir::Witness {
     let span = typ.span;
     match &typ.kind {
-        TypeKind::Func(items) => pointer_witness(),
-        TypeKind::Any(_) => lower_witness(&typ.children[0], fb, env, global),
+        TypeKind::Func(..) => pointer_witness(),
+        TypeKind::Any(..) => lower_witness(&typ.children[0], fb, env, global),
         TypeKind::Named(path, name) => {
             let field_witnesses =
                 field_witnesses(&typ.children, path, name, fb, env, global, typ.span);
@@ -510,8 +510,8 @@ fn lower_witness(typ: &Type, fb: &mut FuncBuilder, env: &Env, global: &Global) -
 fn struct_witness(
     mut fields: Vec<ir::Witness>,
     fb: &mut FuncBuilder,
-    env: &Env,
-    global: &Global,
+    _env: &Env,
+    _global: &Global,
     span: Span,
 ) -> ir::Witness {
     let mut total_size = 0;
@@ -532,21 +532,21 @@ fn struct_witness(
         }
     } else {
         let usize_witness = integer_witness(&IntType::usize());
-        let total_size = fb.instr(
+        let _total_size = fb.instr(
             Type::int(IntType::usize(), span),
             usize_witness.clone(),
             ir::Value::Literal(ast::Literal::Number(total_size.to_string(), span)),
             vec![],
             span,
         );
-        let total_align = fb.instr(
+        let _total_align = fb.instr(
             Type::int(IntType::usize(), span),
             usize_witness,
             ir::Value::Literal(ast::Literal::Number(max_align.to_string(), span)),
             vec![],
             span,
         );
-        todo!()
+        todo!();
     }
 }
 
@@ -557,7 +557,7 @@ fn field_witnesses(
     fb: &mut FuncBuilder,
     env: &Env,
     global: &Global,
-    span: Span,
+    _span: Span,
 ) -> Vec<ir::Witness> {
     let strukt = global.get_struct(path, name).unwrap();
     let mut sub = Sub::default();
@@ -597,7 +597,7 @@ fn lower_lvalue_ref(
             *span,
         ),
         ast::Expr::Op(ast::Op::Deref, args, ..) => lower_expr(&args[0], fb, env, global),
-        ast::Expr::Field(expr, name, meta, span) => {
+        ast::Expr::Field(expr, _, meta, span) => {
             let struct_type = expr.get_type();
             let TypeKind::Named(struct_path, struct_name) = &struct_type.kind else {
                 unreachable!();

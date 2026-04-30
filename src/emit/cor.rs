@@ -83,7 +83,9 @@ fn build_block_state_maps(func: &Func) -> HashMap<BlockId, usize> {
     state_map
 }
 
-fn cor_struct_name(struct_spec: &Spec, func: &Func) -> String {
+fn cor_struct_name(func: &Func) -> String {
+    todo!()
+    /*
     let result_type = Type::named(
         cor_name(&struct_spec.struct_name, &func.name),
         struct_spec.generics.clone(),
@@ -91,16 +93,20 @@ fn cor_struct_name(struct_spec: &Spec, func: &Func) -> String {
     );
 
     emit_type(&result_type)
+    */
 }
 
-pub fn emit_cor_struct(struct_spec: &Spec, func: &Func, text: &mut Text) {
+pub fn emit_cor_struct(func: &Func, text: &mut Text) {
+    /*
     let slots = saved_slots(func).saved_slots;
     let struct_name = cor_struct_name(struct_spec, func);
     let fields = iter::once("i32".into()).chain(slots.iter().map(|slot| emit_type(&slot.1)));
     text.pushln(format!("{struct_name} = type {{ {} }}", str_list(fields)))
+    */
 }
 
-pub fn emit_constructor(struct_spec: &Spec, func: &Func, text: &mut Text) {
+pub fn emit_constructor(func: &Func, text: &mut Text) {
+    /*
     let struct_name = cor_struct_name(struct_spec, func);
 
     let constructor_name = resolve_func(struct_spec, &func.name);
@@ -137,6 +143,7 @@ pub fn emit_constructor(struct_spec: &Spec, func: &Func, text: &mut Text) {
 
     text.dec();
     text.pushln("}");
+    */
 }
 
 fn emit_slot_setup(slots: &CorSlots, cor_struct: &str, text: &mut Text) {
@@ -157,7 +164,8 @@ fn emit_slot_setup(slots: &CorSlots, cor_struct: &str, text: &mut Text) {
     }
 }
 
-pub fn emit_poll(struct_spec: &Spec, func: &Func, text: &mut Text) {
+pub fn emit_poll(func: &Func, text: &mut Text) {
+    /*
     let cor_spec = Spec {
         struct_name: cor_name(&struct_spec.struct_name, &func.name),
         generics: struct_spec.generics.clone(),
@@ -210,6 +218,7 @@ pub fn emit_poll(struct_spec: &Spec, func: &Func, text: &mut Text) {
     }
 
     text.pushln("}");
+    */
 }
 
 fn emit_cor_end(
@@ -246,12 +255,10 @@ fn emit_cor_end(
             then_branch,
             span,
         } => {
+            todo!()
+            /*
             let TypeKind::Named(cor_name) = &cor_struct.1.kind else {
                 unreachable!()
-            };
-            let cor_spec = Spec {
-                struct_name: cor_name.clone(),
-                generics: cor_struct.1.children.clone(),
             };
             let poll_name = resolve_func(&cor_spec, "poll");
             let poll_result = vals.fresh();
@@ -273,6 +280,7 @@ fn emit_cor_end(
             text.pushln(format!("{yield_label}:"));
             text.inc();
             text.pushln("ret i8 0");
+            */
         }
         End::Yield(block_id, span) => {
             let state = id_to_state[block_id];

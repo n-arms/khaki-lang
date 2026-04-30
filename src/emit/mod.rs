@@ -1,10 +1,10 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    ast::{Arith, Cmp, IntType, Literal, Logic, Type, TypeKind},
+    ast::{Arith, Cmp, IntType, Literal, Logic, Prim, Struct, Type, TypeKind},
     derive::CorParts,
     emit::text::{LlvmVals, Text},
-    ir::{BlockId, End, Func, Instr, Op, Slot, Struct, Value},
+    ir::{BlockId, End, Func, Instr, Module, Op, Slot, Value, Witness},
 };
 
 mod cor;
@@ -21,10 +21,9 @@ fn str_list<I: AsRef<str>>(elems: impl IntoIterator<Item = I>) -> String {
     text
 }
 
-fn emit_type(typ: &Type) -> String {
-    if let Some(name) = primitive_type(typ) {
-        return name;
-    }
+fn emit_type(_typ: &Type) -> String {
+    todo!()
+    /*
     if let TypeKind::Named(name) = &typ.kind {
         if name == "Ptr" {
             emit_type(&typ.children[0]) + "*"
@@ -34,111 +33,79 @@ fn emit_type(typ: &Type) -> String {
     } else {
         type_name(typ)
     }
+    */
 }
 
-fn primitive_type(typ: &Type) -> Option<String> {
-    if let Some(int_type) = IntType::from_type(typ) {
-        return Some(format!("i{}", int_type.width()));
-    }
-    if let TypeKind::Named(name) = &typ.kind {
-        if name == "Bool" {
-            return Some("i8".into());
-        }
-    }
-    None
-}
+// fn type_name(typ: &Type) -> String {
+//     if let Some(name) = primitive_type(typ) {
+//         return name;
+//     }
+//     match &typ.kind {
+//         TypeKind::Func => {
+//             let [args @ .., result] = typ.children.as_slice() else {
+//                 unreachable!()
+//             };
+//             format!(
+//                 "{} ({})*",
+//                 emit_type(result),
+//                 str_list(args.iter().map(emit_type))
+//             )
+//         }
+//         TypeKind::Named(name) => {
+//             if name == "Ptr" {
+//                 emit_type(&typ.children[0]) + "*"
+//             } else {
+//                 format!("{name}[{}]", str_list(typ.children.iter().map(type_name)))
+//             }
+//         }
+//         TypeKind::Array(size) => {
+//             format!("[{size} x {}]", emit_type(&typ.children[0]))
+//         }
+//         TypeKind::Generic(_) | TypeKind::Unif(_) => unreachable!(),
+//     }
+// }
 
-fn type_name(typ: &Type) -> String {
-    if let Some(name) = primitive_type(typ) {
-        return name;
-    }
-    match &typ.kind {
-        TypeKind::Func => {
-            let [args @ .., result] = typ.children.as_slice() else {
-                unreachable!()
-            };
-            format!(
-                "{} ({})*",
-                emit_type(result),
-                str_list(args.iter().map(emit_type))
-            )
-        }
-        TypeKind::Named(name) => {
-            if name == "Ptr" {
-                emit_type(&typ.children[0]) + "*"
-            } else {
-                format!("{name}[{}]", str_list(typ.children.iter().map(type_name)))
-            }
-        }
-        TypeKind::Array(size) => {
-            format!("[{size} x {}]", emit_type(&typ.children[0]))
-        }
-        TypeKind::Generic(_) | TypeKind::Unif(_) => unreachable!(),
-    }
-}
+// fn struct_name(struct_spec: &Spec) -> String {
+//     format!(
+//         "{}[{}]",
+//         struct_spec.struct_name,
+//         str_list(struct_spec.generics.iter().map(type_name)),
+//     )
+// }
 
-fn struct_name(struct_spec: &Spec) -> String {
-    format!(
-        "{}[{}]",
-        struct_spec.struct_name,
-        str_list(struct_spec.generics.iter().map(type_name)),
-    )
-}
+// pub fn resolve_struct(struct_spec: &Spec) -> String {
+//     format!("%\"{}\"", struct_name(struct_spec))
+// }
 
-pub fn resolve_struct(struct_spec: &Spec) -> String {
-    format!("%\"{}\"", struct_name(struct_spec))
-}
-
-pub fn resolve_func(struct_spec: &Spec, func_name: &str) -> String {
-    format!("@\"{}.{}\"", struct_name(struct_spec), func_name)
+pub fn resolve_func(func_name: &str) -> String {
+    format!("@\"{}\"", func_name)
 }
 
 fn slot_name(slot: &Slot) -> String {
     format!("%{}", slot.0)
 }
 
-pub fn emit_program(
-    program: &HashMap<Spec, Struct>,
-    cor_structs: &HashMap<String, CorParts>,
-) -> String {
+pub fn emit_program(module: &Module, cor_structs: &HashMap<String, CorParts>) -> String {
     let mut text = Text::default();
 
-    for (spec, strukt) in program {
-        if ["Int", "Bool"].contains(&spec.struct_name.as_str()) {
-            continue;
-        }
+    for strukt in module.structs.values() {
+        todo!()
+        /*
         if let Some(cor_parts) = cor_structs.get(&spec.struct_name) {
-            let cor_spec = Spec {
-                struct_name: cor_parts.struct_name.clone(),
-                generics: spec.generics.clone(),
-            };
-            let func = &program[&cor_spec].funcs[&cor_parts.func_name];
-            cor::emit_cor_struct(&cor_spec, func, &mut text);
+            //let func = &module.funcs[&cor_parts.func_name];
+            //cor::emit_cor_struct(&cor_spec, func, &mut text);
         } else {
-            emit_struct_type_def(spec, strukt, &mut text);
+            emit_struct_type_def(strukt, &mut text);
         }
+        */
     }
 
-    for (spec, strukt) in program {
-        if cor_structs.contains_key(&spec.struct_name) {
-            continue;
-        }
-        for func in strukt.funcs.values() {
-            if func.is_cor {
-                cor::emit_constructor(spec, func, &mut text);
-                cor::emit_poll(spec, func, &mut text);
-            } else {
-                if spec.struct_name == "Main" && func.name == "main" {
-                    text.pushln("define i32 @main() {");
-                    text.pushln("entry:");
-                    text.inc();
-                    text.pushln("%exit_code = call i32 @\"Main[].main\"()");
-                    text.pushln("ret i32 %exit_code");
-                    text.dec();
-                    text.pushln("}");
-                }
-                emit_func(spec, func, &mut text);
-            }
+    for func in module.funcs.values() {
+        if func.is_cor {
+            cor::emit_constructor(func, &mut text);
+            cor::emit_poll(func, &mut text);
+        } else {
+            emit_func(func, &mut text);
         }
     }
 
@@ -149,17 +116,19 @@ pub fn emit_program(
     text.finish()
 }
 
-fn emit_struct_type_def(struct_spec: &Spec, strukt: &Struct, text: &mut Text) {
+fn emit_struct_type_def(strukt: &Struct, text: &mut Text) {
+    /*
     text.pushln(format!(
         "{} = type {{ {} }}",
-        resolve_struct(struct_spec),
-        str_list(strukt.fields.values().map(emit_type))
+        &strukt.name,
+        str_list(strukt.fields.values().map(|_| todo!()))
     ));
+    */
 }
 
 // emits a "normal" function (not a cor)
-fn emit_func(struct_spec: &Spec, func: &Func, text: &mut Text) {
-    emit_func_prefix(struct_spec, func, text);
+fn emit_func(func: &Func, text: &mut Text) {
+    emit_func_prefix(func, text);
     let mut vals = LlvmVals::default();
     text.pushln(" {");
     text.pushln("entry:");
@@ -190,9 +159,7 @@ fn load_slot(slot: &Slot, text: &mut Text, vals: &mut LlvmVals) -> String {
     let slot_name = slot_name(slot);
     let result_type = emit_type(&slot.1);
     let temp = vals.fresh();
-    text.pushln(format!(
-        "{temp} = load {result_type}, {result_type}* {slot_name}",
-    ));
+    text.pushln(format!("{temp} = load {result_type}, ptr {slot_name}",));
     temp
 }
 
@@ -201,7 +168,7 @@ fn store_slot(slot: &Slot, val: impl AsRef<str>, text: &mut Text) {
     let slot_name = slot_name(slot);
     let result_type = emit_type(&slot.1);
     text.pushln(format!(
-        "store {result_type} {}, {result_type}* {slot_name}",
+        "store {result_type} {}, ptr {slot_name}",
         val.as_ref()
     ));
 }
@@ -210,22 +177,18 @@ fn arg_name(slot: &Slot) -> String {
     format!("%arg_{}", slot.0)
 }
 
-fn emit_func_prefix(struct_spec: &Spec, func: &Func, text: &mut Text) {
-    let func_name = resolve_func(struct_spec, &func.name);
+fn emit_func_prefix(func: &Func, text: &mut Text) {
+    let func_name = resolve_func(&func.name);
     let result_type = emit_type(&func.result);
     text.push(format!(
         "define {result_type} {func_name}({}) #0",
-        str_list(
-            func.args
-                .iter()
-                .map(|arg| format!("{} {}", emit_type(&arg.1), arg_name(arg)))
-        )
+        str_list(func.args.iter().map(|arg| format!("ptr {}", arg_name(arg))))
     ));
 }
 
 // emit top-level alloca's for each slot, and store the function arguments into the appropriate slots
 pub fn emit_slot_setup(func: &Func, text: &mut Text) {
-    let mut slots: HashSet<_> = func
+    let slots: HashSet<_> = func
         .blocks
         .values()
         .flat_map(|block| {
@@ -237,14 +200,20 @@ pub fn emit_slot_setup(func: &Func, text: &mut Text) {
             block_slots.extend(block.end.result_slots());
             block_slots
         })
+        .chain(&func.args)
+        .filter_map(|slot| {
+            if let Witness::Static { size, align } = &slot.2 {
+                Some((slot.clone(), size, align))
+            } else {
+                None
+            }
+        })
         .collect();
-    slots.extend(&func.args);
 
-    for slot in slots {
+    for (slot, size, align) in slots {
         text.pushln(format!(
-            "{} = alloca {}",
+            "{} = alloca [{size} x i8], align {align}",
             slot_name(&slot),
-            emit_type(&slot.1)
         ));
     }
 }
@@ -257,14 +226,14 @@ fn emit_arg_loads(func: &Func, text: &mut Text) {
 
 fn emit_end(end: &End, text: &mut Text, vals: &mut LlvmVals) {
     match end {
-        End::Jump(block_id, span) => {
+        End::Jump(block_id, _) => {
             text.pushln(format!("br label %{}", block_name(*block_id)));
         }
         End::JumpIf {
             slot,
             then_branch,
             else_branch,
-            span,
+            ..
         } => {
             let cond = load_slot(slot, text, vals);
             let temp = vals.fresh();
@@ -277,14 +246,9 @@ fn emit_end(end: &End, text: &mut Text, vals: &mut LlvmVals) {
                 "br i1 {temp}, label %{then_label}, label %{else_label}"
             ));
         }
-        End::Await {
-            cor_struct,
-            result,
-            then_branch,
-            span,
-        } => todo!(),
-        End::Yield(block_id, span) => todo!(),
-        End::Return(slot, span) => {
+        End::Await { .. } => unreachable!(),
+        End::Yield(..) => unreachable!(),
+        End::Return(slot, ..) => {
             let return_val = load_slot(slot, text, vals);
             let return_type = emit_type(&slot.1);
             text.pushln(format!("ret {return_type} {return_val}"));
@@ -309,8 +273,8 @@ fn emit_instr(instr: &Instr, text: &mut Text, vals: &mut LlvmVals) {
             let temp = load_slot(&instr.args[0], text, vals);
             store_result(temp, text);
         }
-        Value::Func(struct_spec, func_name) => {
-            let name = resolve_func(struct_spec, func_name);
+        Value::Func(path, func_name) => {
+            let name = resolve_func(func_name);
             store_result(name, text);
         }
         Value::Literal(literal) => {
@@ -505,20 +469,20 @@ fn emit_instr(instr: &Instr, text: &mut Text, vals: &mut LlvmVals) {
         Value::Ref => {
             store_result(slot_name(&instr.args[0]), text);
         }
-        Value::FieldRef(index) => {
+        Value::FieldGet(index, witnesses) => todo!(),
+        Value::FieldRef(index, witnesses) => {
             let container_ptr = load_slot(&instr.args[0], text, vals);
             let field_ptr = vals.fresh();
-            let TypeKind::Named(ptr) = &instr.args[0].1.kind else {
+            let TypeKind::Primitive(Prim::Ptr) = &instr.args[0].1.kind else {
                 unreachable!()
             };
-            assert_eq!(ptr, "Ptr");
             let container_type = emit_type(&instr.args[0].1.children[0]);
             text.pushln(format!(
                             "{field_ptr} = getelementptr {container_type}, {container_type}* {container_ptr}, i32 0, i32 {index}"
                         ));
             store_result(field_ptr, text);
         }
-        Value::PackStruct(spec) => {
+        Value::PackStruct(path, name) => {
             let struct_slot = slot_name(&instr.result);
             for (i, arg) in instr.args.iter().enumerate() {
                 let arg_slot = load_slot(arg, text, vals);
@@ -549,21 +513,20 @@ fn emit_instr(instr: &Instr, text: &mut Text, vals: &mut LlvmVals) {
         Value::RefArray => {
             let array_slot = slot_name(&instr.args[0]);
             let array_ptr = vals.fresh();
-            assert_eq!(instr.result.1.kind, TypeKind::Named("Ptr".into()));
+            assert_eq!(instr.result.1.kind, TypeKind::Primitive(Prim::Ptr));
             let array_type = emit_type(&instr.args[0].1);
             text.pushln(format!(
                 "{array_ptr} = getelementptr {array_type}, {array_type}* {array_slot}, i32 0, i32 0"
             ));
             store_result(array_ptr, text);
         }
-        Value::IndexRef => {
+        Value::IndexRef(elem_witness) => {
             let array_ptr = load_slot(&instr.args[0], text, vals);
             let index = load_slot(&instr.args[1], text, vals);
             let elem_ptr = vals.fresh();
-            let TypeKind::Named(ptr) = &instr.args[0].1.kind else {
+            let TypeKind::Primitive(Prim::Ptr) = &instr.args[0].1.kind else {
                 unreachable!()
             };
-            assert_eq!(ptr, "Ptr");
             let elem_type = emit_type(&instr.args[0].1.children[0]);
             text.pushln(format!(
                 "{elem_ptr} = getelementptr {elem_type}, {elem_type}* {array_ptr}, i32 {index}"

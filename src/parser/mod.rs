@@ -53,7 +53,7 @@ type Ctx<'a> = Full<Rich<'a, TokenKind>, (), ()>;
 
 fn list<'a, I: Input<'a, Token = TokenKind, Span = SimpleSpan>, T: Clone>(
     elem: impl Parser<'a, I, T, Ctx<'a>> + Clone,
-    file_id: FileId,
+    _file_id: FileId,
 ) -> impl Parser<'a, I, Vec<T>, Ctx<'a>> + Clone {
     elem.clone()
         .then(
@@ -129,7 +129,7 @@ fn module<'a, I: Input<'a, Token = TokenKind, Span = SimpleSpan>>(
 
         let base = generic.or(named).or(slice).or(func).or(any);
         base.then(just(TokenKind::Star).repeated().collect::<Vec<_>>()).map_with(move |(mut typ, stars), e| {
-            for star in stars {
+            for _star in stars {
                 typ = Type::ptr(typ, get_span(e, file_id));
             }
             typ

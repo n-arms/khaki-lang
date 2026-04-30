@@ -33,7 +33,7 @@ pub enum Error {
     BadOpen(Expr, Span),
 }
 
-pub fn type_program(modules: &mut HashMap<Vec<String>, Module>) -> Result<(), Vec<Error>> {
+pub fn type_program(modules: &mut HashMap<Vec<String>, Module>) -> Result<Global, Vec<Error>> {
     let sigs = modules
         .par_iter()
         .map(|(path, module)| (path.clone(), build_sig(module)))
@@ -42,7 +42,7 @@ pub fn type_program(modules: &mut HashMap<Vec<String>, Module>) -> Result<(), Ve
     let errors: Vec<_> = modules
         .par_iter_mut()
         .flat_map_iter(|(path, module)| module.funcs.iter_mut().map(|func| (path.clone(), func)))
-        .filter_map(|(path, (name, func))| {
+        .filter_map(|(path, (_, func))| {
             let path = Path {
                 path,
                 span: func.result.span,
@@ -55,7 +55,7 @@ pub fn type_program(modules: &mut HashMap<Vec<String>, Module>) -> Result<(), Ve
         })
         .collect();
     if errors.is_empty() {
-        Ok(())
+        Ok(env)
     } else {
         Err(errors)
     }
