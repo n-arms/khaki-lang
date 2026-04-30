@@ -5,16 +5,18 @@ use chumsky::{
     error::Rich,
     extra::{Full, ParserExtra},
     input::{Input, MapExtra},
-    pratt::{prefix, infix, left, postfix},
+    pratt::{infix, left, postfix, prefix},
     prelude::{choice, just, recursive},
     span::SimpleSpan,
 };
 
 use logos::Logos;
+use std::collections::HashMap;
+use std::cell::LazyCell;
 
 use crate::{
     ast::{
-        Arith, Cmp, Expr, FileId, Func, Literal, Logic, Module, Op, Path, Span, Stmt, Struct, Type,
+        Arith, Cmp, Expr, FileId, Func, Literal, Logic, Module, Op, Path, Span, Stmt, Struct, Type, IntType,
         TypeKind, constructor_name,
     },
     parser::token::TokenKind,
@@ -85,6 +87,12 @@ fn program<'a, I: Input<'a, Token = TokenKind, Span = SimpleSpan>>(
     module(input, file_id)
 }
 
+const INT_TYPES: LazyCell<HashMap<&'static str, IntType>> = LazyCell::new(|| HashMap::from([
+    ("I32", IntType::signed(4)),
+    ("I16", IntType::signed(2)),
+    ("I8", IntType::signed(1)),
+]));
+
 fn module<'a, I: Input<'a, Token = TokenKind, Span = SimpleSpan>>(
     input: &'a str,
     file_id: FileId,
@@ -102,10 +110,16 @@ fn module<'a, I: Input<'a, Token = TokenKind, Span = SimpleSpan>>(
                     .or_not()
                     .map(|list| list.unwrap_or_default()),
             )
-            .map_with(move |((path, name), children), e| Type {
-                kind: TypeKind::Named(Path::new(path, get_span(e, file_id)), name),
-                span: get_span(e, file_id),
-                children,
+            .map_with(move |((path, name), children): ((Vec<String>, String), Vec<Type>), e| {
+                if let Some(int_type) = INT_TYPES.get(name.as_str()) {
+                    Type::int(*int_type, get_span(e, file_id))
+                } else {
+                    Type {
+                        kind: TypeKind::Named(Path::new(path, get_span(e, file_id)), name),
+                        span: get_span(e, file_id),
+                        children,
+                    }
+                }
             });
         let generic = name(input)
             .map_with(move |name, e| Type::base(TypeKind::Generic(name, 0), get_span(e, file_id)));
@@ -114,26 +128,40 @@ fn module<'a, I: Input<'a, Token = TokenKind, Span = SimpleSpan>>(
             .ignore_then(typ.clone())
             .map_with(move |elem, e| Type::slice(elem, get_span(e, file_id)));
         let any = just(TokenKind::Any)
-            .ignore_then(name(input).delimited_by(just(TokenKind::LeftSquare), just(TokenKind::RightSquare)))
-            .then(typ.clone()).map_with(move |(var, typ), e| Type {
+            .ignore_then(
+                name(input).delimited_by(just(TokenKind::LeftSquare), just(TokenKind::RightSquare)),
+            )
+            .then(typ.clone())
+            .map_with(move |(var, typ), e| Type {
                 kind: TypeKind::Any(var),
                 children: vec![typ],
-                span: get_span(e, file_id)
+                span: get_span(e, file_id),
             });
         let func = just(TokenKind::Func)
-            .ignore_then(list(name(input), file_id).delimited_by(just(TokenKind::LeftSquare), just(TokenKind::RightSquare)).or_not().map(|g| g.unwrap_or_default()))
-            .then(list(typ.clone(), file_id).delimited_by(just(TokenKind::LeftParen), just(TokenKind::RightParen)))
+            .ignore_then(
+                list(name(input), file_id)
+                    .delimited_by(just(TokenKind::LeftSquare), just(TokenKind::RightSquare))
+                    .or_not()
+                    .map(|g| g.unwrap_or_default()),
+            )
+            .then(
+                list(typ.clone(), file_id)
+                    .delimited_by(just(TokenKind::LeftParen), just(TokenKind::RightParen)),
+            )
             .then_ignore(just(TokenKind::Colon))
             .then(typ.clone())
-            .map_with(move |((generics, args), result), e| Type::func(generics, args, result, get_span(e, file_id)));
+            .map_with(move |((generics, args), result), e| {
+                Type::func(generics, args, result, get_span(e, file_id))
+            });
 
         let base = generic.or(named).or(slice).or(func).or(any);
-        base.then(just(TokenKind::Star).repeated().collect::<Vec<_>>()).map_with(move |(mut typ, stars), e| {
-            for _star in stars {
-                typ = Type::ptr(typ, get_span(e, file_id));
-            }
-            typ
-        })
+        base.then(just(TokenKind::Star).repeated().collect::<Vec<_>>())
+            .map_with(move |(mut typ, stars), e| {
+                for _star in stars {
+                    typ = Type::ptr(typ, get_span(e, file_id));
+                }
+                typ
+            })
     });
 
     let expr = {
@@ -313,11 +341,9 @@ fn module<'a, I: Input<'a, Token = TokenKind, Span = SimpleSpan>>(
             let bit_and_op = just(TokenKind::Ampersand)
                 .and_is(just(TokenKind::Ampersand).then(atom_start.clone()));
             base.pratt((
-                prefix(
-                    101,
-                    just(TokenKind::Open),
-                    move |_, inner, e| Expr::Op(Op::Open(None), vec![inner], None, get_span(e, file_id))
-                ),
+                prefix(101, just(TokenKind::Open), move |_, inner, e| {
+                    Expr::Op(Op::Open(None), vec![inner], None, get_span(e, file_id))
+                }),
                 postfix(
                     100,
                     just(TokenKind::Dot).ignore_then(name(input)),

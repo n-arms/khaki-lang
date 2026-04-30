@@ -408,7 +408,7 @@ fn witness_type(span: Span) -> Type {
 }
 
 fn unit_witness() -> ir::Witness {
-    ir::Witness::Static { size: 0, align: 0 }
+    ir::Witness::Static { size: 0, align: 1 }
 }
 
 fn pointer_witness() -> ir::Witness {

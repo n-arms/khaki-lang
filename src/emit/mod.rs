@@ -21,19 +21,22 @@ fn str_list<I: AsRef<str>>(elems: impl IntoIterator<Item = I>) -> String {
     text
 }
 
-fn emit_type(_typ: &Type) -> String {
-    todo!()
-    /*
-    if let TypeKind::Named(name) = &typ.kind {
-        if name == "Ptr" {
-            emit_type(&typ.children[0]) + "*"
-        } else {
-            format!("%\"{}\"", type_name(typ))
-        }
-    } else {
-        type_name(typ)
+fn emit_type(typ: &Type) -> String {
+    use TypeKind::*;
+    match &typ.kind {
+        Func(..) => "ptr".into(),
+        Any(..) => emit_type(&typ.children[0]),
+        Named(..) => unreachable!(),
+        Primitive(prim) => match prim {
+            Prim::Int(int_type) => format!("i{}", int_type.width() * 8),
+            Prim::Bool => "i8".into(),
+            Prim::Unit => "{}".into(),
+            Prim::Ptr => "ptr".into()
+        },
+        Unif(..) => unreachable!(),
+        Generic(name, id) => unreachable!(),
+        Array(..) => unreachable!()
     }
-    */
 }
 
 // fn type_name(typ: &Type) -> String {

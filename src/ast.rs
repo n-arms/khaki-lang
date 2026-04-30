@@ -105,6 +105,10 @@ pub struct Type {
     pub children: Vec<Type>,
 }
 
+pub fn generic_name(name: &str, id: usize) -> String {
+    format!("{name}_{id}")
+}
+
 impl hash::Hash for Type {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.kind.hash(state);
