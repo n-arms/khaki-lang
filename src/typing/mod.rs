@@ -17,6 +17,7 @@ mod sig;
 mod solve;
 pub mod sub;
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub enum Error {
     UnknownName(String, Span),

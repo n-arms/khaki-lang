@@ -376,7 +376,7 @@ pub enum Logic {
 pub enum Expr {
     Var(String, Option<Type>, Span),
     /// all functions are of the form path.func(args)
-    Func(Path, String, Option<(Type, Vec<Type>)>, Span),
+    Func(Path, String, Option<Type>, Span),
     Literal(Literal, Option<Type>),
     Op(Op, Vec<Expr>, Option<Type>, Span),
     Call(Box<Expr>, Vec<Expr>, Option<Type>, Span),
@@ -405,8 +405,8 @@ impl Expr {
             Expr::Var(_, typ, _)
             | Expr::Literal(_, typ)
             | Expr::Op(_, _, typ, _)
+            | Expr::Func(_, _, typ, _)
             | Expr::Call(_, _, typ, _) => typ.clone().unwrap(),
-            Expr::Func(_, _, meta, _) => meta.as_ref().unwrap().0.clone(),
             Expr::Field(_, _, meta, _) => meta.clone().unwrap().0,
             Expr::Block(_, expr, span) => {
                 if let Some(expr) = expr {

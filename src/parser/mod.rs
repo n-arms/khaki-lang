@@ -11,19 +11,20 @@ use chumsky::{
 };
 
 use logos::Logos;
-use std::collections::HashMap;
 use std::cell::LazyCell;
+use std::collections::HashMap;
 
 use crate::{
     ast::{
-        Arith, Cmp, Expr, FileId, Func, Literal, Logic, Module, Op, Path, Span, Stmt, Struct, Type, IntType,
-        TypeKind, constructor_name,
+        Arith, Cmp, Expr, FileId, Func, IntType, Literal, Logic, Module, Op, Path, Span, Stmt,
+        Struct, Type, TypeKind, constructor_name,
     },
     parser::token::TokenKind,
 };
 
 pub mod token;
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct BadToken(pub Range<usize>);
 
@@ -87,11 +88,13 @@ fn program<'a, I: Input<'a, Token = TokenKind, Span = SimpleSpan>>(
     module(input, file_id)
 }
 
-const INT_TYPES: LazyCell<HashMap<&'static str, IntType>> = LazyCell::new(|| HashMap::from([
-    ("I32", IntType::signed(4)),
-    ("I16", IntType::signed(2)),
-    ("I8", IntType::signed(1)),
-]));
+const INT_TYPES: LazyCell<HashMap<&'static str, IntType>> = LazyCell::new(|| {
+    HashMap::from([
+        ("I32", IntType::signed(4)),
+        ("I16", IntType::signed(2)),
+        ("I8", IntType::signed(1)),
+    ])
+});
 
 fn module<'a, I: Input<'a, Token = TokenKind, Span = SimpleSpan>>(
     input: &'a str,
@@ -110,17 +113,19 @@ fn module<'a, I: Input<'a, Token = TokenKind, Span = SimpleSpan>>(
                     .or_not()
                     .map(|list| list.unwrap_or_default()),
             )
-            .map_with(move |((path, name), children): ((Vec<String>, String), Vec<Type>), e| {
-                if let Some(int_type) = INT_TYPES.get(name.as_str()) {
-                    Type::int(*int_type, get_span(e, file_id))
-                } else {
-                    Type {
-                        kind: TypeKind::Named(Path::new(path, get_span(e, file_id)), name),
-                        span: get_span(e, file_id),
-                        children,
+            .map_with(
+                move |((path, name), children): ((Vec<String>, String), Vec<Type>), e| {
+                    if let Some(int_type) = INT_TYPES.get(name.as_str()) {
+                        Type::int(*int_type, get_span(e, file_id))
+                    } else {
+                        Type {
+                            kind: TypeKind::Named(Path::new(path, get_span(e, file_id)), name),
+                            span: get_span(e, file_id),
+                            children,
+                        }
                     }
-                }
-            });
+                },
+            );
         let generic = name(input)
             .map_with(move |name, e| Type::base(TypeKind::Generic(name, 0), get_span(e, file_id)));
         let slice = just(TokenKind::LeftSquare)

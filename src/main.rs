@@ -1,16 +1,13 @@
 use std::{collections::HashMap, fs, process::Command};
 
 use crate::{
-    ast::{Expr, Func, IntType, Op, Path, Span, Struct, Type},
+    ast::{Path, Span},
     derive::{derive_constructors, derive_cor_structs},
     emit::emit_program,
     lower::lower_module,
-    ord_map::OrdMap,
     parser::{parse_program, scan_program},
     typing::type_program,
 };
-
-use rand::{distr::{SampleString, slice::Choose}, prelude::*};
 
 mod ast;
 mod derive;
@@ -21,15 +18,12 @@ mod ord_map;
 mod parser;
 mod typing;
 
-fn compile_and_run(
-    source: &str
-) -> i32 {
+fn compile_and_run(name: &str, source: &str) -> i32 {
     let file_id = 0;
     let tokens = scan_program(source).unwrap();
     let mut module = parse_program(source, &tokens, file_id).unwrap();
 
     let span = Span::new(file_id, 0, 0);
-
 
     // module.structs.insert(
     //     "Slice".into(),
@@ -56,10 +50,8 @@ fn compile_and_run(
     let lowered = lower_module(&module_map[&vec![]], &global);
     dbg!(&lowered);
     let llvm = emit_program(&lowered, &cor_structs);
-    let mut exe_path = Choose::new(&['a', 'b', 'c']).unwrap().sample_string(&mut rand::rng(), 10);
-    exe_path.insert_str(0, "./target/");
-    let mut file_path = exe_path.clone();
-    file_path.push_str(".ll");
+    let exe_path = format!("./target/{name}");
+    let file_path = format!("./target/{name}.ll");
     fs::write(&file_path, llvm).unwrap();
     let clang_output = Command::new("clang")
         .args(["-mllvm", "-opaque-pointers", &file_path, "-o", &exe_path])
@@ -77,7 +69,7 @@ fn main() {
     func main(): I32 = 3
     "#;
 
-    println!("Exe result: {}", compile_and_run(source));
+    println!("Exe result: {}", compile_and_run("main", source));
 }
 
 #[cfg(test)]
@@ -86,29 +78,34 @@ mod tests {
 
     #[test]
     fn int_literal() {
-        assert_eq!(
-            compile_and_run("func main(): I32 = 3"), 3
-        )
+        assert_eq!(compile_and_run("int_literal", "func main(): I32 = 3"), 3)
     }
 
     #[test]
     fn set_get_variable() {
         assert_eq!(
-            compile_and_run(r#"func main(): I32 = {
+            compile_and_run(
+                "set_get",
+                r#"func main(): I32 = {
                 let x = 5;
                 set x = 6;
                 x
-            }"#), 6
+            }"#
+            ),
+            6
         )
     }
 
     #[test]
     fn call_add1() {
         assert_eq!(
-            compile_and_run(r#"
+            compile_and_run(
+                "add1",
+                r#"
                 func add1(x: I32): I32 = x + 1
                 func main(): I32 = add1(5)
-            "#),
+            "#
+            ),
             6
         )
     }

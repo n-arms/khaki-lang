@@ -1,5 +1,5 @@
 use crate::{
-    ast::{AnyMeta, Expr, IntType, Literal, Op, Prim, Span, Stmt, Type, TypeKind, cor_name},
+    ast::{AnyMeta, Expr, IntType, Literal, Op, Path, Prim, Span, Stmt, Type, TypeKind},
     typing::{
         Error,
         env::{Global, Local, Scope},
@@ -46,25 +46,49 @@ pub fn infer_expr(
     println!("infer {expr:?}");
     match expr {
         Expr::Var(name, typ, span) => {
-            *typ = Some(scope.get_var(name, *span)?.clone());
+            if let Ok(func) = global.get_func(&Path::new(vec![], *span), name) {
+                let result_type = if func.is_cor {
+                    /*
+                    Type::named(
+                        path.clone(),
+                        cor_name(func_name),
+                        func_generics.clone(),
+                        *span,
+                    )
+                    */
+                    todo!()
+                } else {
+                    func.result.clone()
+                };
+                let func_type =
+                    Type::func(func.generics.clone(), func.arg_types(), result_type, *span);
+                *expr = Expr::Func(
+                    Path::new(vec![], *span),
+                    name.clone(),
+                    Some(func_type),
+                    *span,
+                );
+            } else {
+                *typ = Some(scope.get_var(name, *span)?.clone());
+            }
         }
         Expr::Func(path, func_name, meta, span) => {
             let func = global.get_func(path, func_name)?;
-            let (func_generics, generic_sub) = instantiate(&func.generics, local, *span);
             let result_type = if func.is_cor {
+                /*
                 Type::named(
                     path.clone(),
                     cor_name(func_name),
                     func_generics.clone(),
                     *span,
                 )
+                */
+                todo!()
             } else {
                 func.result.clone()
             };
-            let mut func_type =
-                Type::func(func.generics.clone(), func.arg_types(), result_type, *span);
-            generic_sub.typ(&mut func_type);
-            *meta = Some((func_type, func_generics));
+            let func_type = Type::func(func.generics.clone(), func.arg_types(), result_type, *span);
+            *meta = Some(func_type);
         }
         Expr::Literal(literal, typ) => match literal {
             Literal::Bool(_, span) => *typ = Some(Type::bool(*span)),
@@ -123,7 +147,7 @@ pub fn infer_expr(
                     args[1].get_type()
                 }
                 Op::While => {
-                    local.unify(Type::bool(*span), args[0].get_type(), *span);
+                    local.unify(Type::bool(*span), args[0].get_type(), *span)?;
                     Type::unit(*span)
                 }
                 Op::Constructor(..) => local.fresh(*span),
@@ -141,23 +165,23 @@ pub fn infer_expr(
                             return Ok(());
                         }
                     }
-                    local.unify(arg_type, Type::slice(result.clone(), *span), *span);
+                    local.unify(arg_type, Type::slice(result.clone(), *span), *span)?;
                     result
                 }
                 Op::Arith(_) => {
-                    local.unify(args[0].get_type(), args[1].get_type(), *span);
+                    local.unify(args[0].get_type(), args[1].get_type(), *span)?;
                     local.unify_int(args[0].get_type(), *span);
                     args[0].get_type()
                 }
                 Op::Cmp(_) => {
-                    local.unify(args[0].get_type(), args[1].get_type(), *span);
+                    local.unify(args[0].get_type(), args[1].get_type(), *span)?;
                     local.unify_int(args[0].get_type(), *span);
                     // TODO: support comparisons for things that aren't integers
                     Type::bool(*span)
                 }
                 Op::Logic(_) => {
-                    local.unify(args[0].get_type(), Type::bool(*span), *span);
-                    local.unify(args[1].get_type(), Type::bool(*span), *span);
+                    local.unify(args[0].get_type(), Type::bool(*span), *span)?;
+                    local.unify(args[1].get_type(), Type::bool(*span), *span)?;
                     Type::bool(*span)
                 }
                 Op::Open(meta) => {
@@ -217,7 +241,7 @@ pub fn infer_expr(
                         infer_expr(expr, global, local, &inner)?;
                         let expr_type = expr.get_type();
                         let span = expr_type.span;
-                        local.unify(lval.get_type(), expr_type, span);
+                        local.unify(lval.get_type(), expr_type, span)?;
                     }
                     Stmt::Expr(expr) => {
                         infer_expr(expr, global, local, &inner)?;
@@ -295,27 +319,4 @@ fn ensure_lvalue(lvalue: &Expr, set_span: Span) -> Result<(), Error> {
         _ => return Err(Error::BadLValue(lvalue.clone(), set_span)),
     }
     Ok(())
-}
-
-fn instantiate(generics: &[String], local: &mut Local, span: Span) -> (Vec<Type>, Sub) {
-    let mut sub = Sub::default();
-    let types = instantiate_into(generics, &mut sub, local, span);
-    (types, sub)
-}
-
-fn instantiate_into(
-    generics: &[String],
-    sub: &mut Sub,
-    local: &mut Local,
-    span: Span,
-) -> Vec<Type> {
-    let mut generic_types = Vec::new();
-
-    for name in generics {
-        let typ = local.fresh(span);
-        generic_types.push(typ.clone());
-        sub.set_generic(name.to_string(), typ);
-    }
-
-    generic_types
 }

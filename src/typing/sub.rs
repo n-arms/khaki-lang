@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use chumsky::container::Seq;
 
-use crate::ast::{Expr, Func, Span, Stmt, Struct, Type, TypeKind};
+use crate::ast::{Expr, Func, Span, Stmt, Type, TypeKind};
 
 #[derive(Clone, Default, Debug)]
 pub struct Sub {
@@ -91,11 +91,8 @@ impl Sub {
                 }
             }
             Expr::Func(_, _, meta, _) => {
-                if let Some((typ, generics)) = meta.as_mut() {
+                if let Some(typ) = meta.as_mut() {
                     self.typ(typ);
-                    for typ in generics.iter_mut() {
-                        self.typ(typ);
-                    }
                 }
             }
             Expr::Op(_, args, typ, _) => {
@@ -149,11 +146,5 @@ impl Sub {
         }
         self.typ(&mut func.result);
         self.expr(&mut func.body);
-    }
-
-    pub fn strukt(&self, strukt: &mut Struct) {
-        for typ in strukt.fields.values_mut() {
-            self.typ(typ);
-        }
     }
 }
