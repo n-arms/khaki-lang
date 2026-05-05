@@ -3,10 +3,11 @@
 use std::collections::HashMap;
 
 use crate::{
-    ast::{Module, Struct, Type, cor_name},
+    ast::{Module, Struct, Type},
     typing::solve::CorResult,
 };
 
+#[derive(Debug)]
 pub struct FuncDef {
     pub generics: Vec<String>,
     pub args: Vec<(String, Type)>,
@@ -20,6 +21,7 @@ impl FuncDef {
     }
 }
 
+#[derive(Debug)]
 pub struct ModuleSig {
     pub structs: HashMap<String, Struct>,
     pub func_defs: HashMap<String, FuncDef>,
@@ -49,7 +51,7 @@ pub fn build_sig(module: &Module) -> ModuleSig {
         .filter_map(|(name, func)| {
             if func.is_cor {
                 Some((
-                    cor_name(&name),
+                    name.clone(),
                     CorResult {
                         generics: func.generics.clone(),
                         result: func.result.clone(),

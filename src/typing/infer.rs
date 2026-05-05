@@ -48,15 +48,17 @@ pub fn infer_expr(
         Expr::Var(name, typ, span) => {
             if let Ok(func) = global.get_func(&Path::new(vec![], *span), name) {
                 let result_type = if func.is_cor {
-                    /*
+                    let generics = func
+                        .generics
+                        .iter()
+                        .map(|generic| Type::generic(generic, *span))
+                        .collect();
                     Type::named(
-                        path.clone(),
-                        cor_name(func_name),
-                        func_generics.clone(),
+                        Path::new(vec![name.clone()], *span),
+                        name.clone(),
+                        generics,
                         *span,
                     )
-                    */
-                    todo!()
                 } else {
                     func.result.clone()
                 };
@@ -75,15 +77,12 @@ pub fn infer_expr(
         Expr::Func(path, func_name, meta, span) => {
             let func = global.get_func(path, func_name)?;
             let result_type = if func.is_cor {
-                /*
-                Type::named(
-                    path.clone(),
-                    cor_name(func_name),
-                    func_generics.clone(),
-                    *span,
-                )
-                */
-                todo!()
+                let generics = func
+                    .generics
+                    .iter()
+                    .map(|generic| Type::generic(generic, *span))
+                    .collect();
+                Type::named(path.clone(), func_name.clone(), generics, *span)
             } else {
                 func.result.clone()
             };
@@ -113,7 +112,7 @@ pub fn infer_expr(
                         let span = *span;
                         return Err(Error::NeedsTypeAnnotation(expr.clone(), span));
                     };
-                    let cor_result = global.get_cor(&path, &name)?;
+                    let cor_result = global.get_cor(&path.popped(), &name)?;
                     let mut sub = Sub::default();
                     for (name, typ) in cor_result.generics.iter().zip(args[0].get_type().children) {
                         sub.set_generic(name.clone(), typ.clone());

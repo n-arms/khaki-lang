@@ -8,6 +8,7 @@ use crate::{
 };
 
 mod builder;
+pub mod decor;
 
 #[derive(Clone, Default)]
 struct Env {
@@ -39,6 +40,12 @@ fn lower_func(func: &ast::Func, global: &Global) -> ir::Func {
     let mut fb = FuncBuilder::new();
     let mut env = Env::default();
     let mut args = Vec::new();
+    let span = func.result.span;
+    for name in &func.generics {
+        let slot = fb.slot(witness_type(span), witness_witness());
+        env.set_var(name.clone(), slot.clone());
+        args.push(slot);
+    }
     for (name, typ) in &func.args {
         let witness = lower_witness(typ, &mut fb, &env, &global);
         let slot = fb.slot(typ.clone(), witness);
@@ -411,7 +418,15 @@ fn unit_witness() -> ir::Witness {
     ir::Witness::Static { size: 0, align: 1 }
 }
 
+fn bool_witness() -> ir::Witness {
+    ir::Witness::Static { size: 1, align: 1 }
+}
+
 fn pointer_witness() -> ir::Witness {
+    ir::Witness::Static { size: 8, align: 8 }
+}
+
+fn function_witness() -> ir::Witness {
     ir::Witness::Static { size: 8, align: 8 }
 }
 
@@ -438,7 +453,7 @@ fn lower_witness(typ: &Type, fb: &mut FuncBuilder, env: &Env, global: &Global) -
         TypeKind::Named(path, name) => {
             let field_witnesses =
                 field_witnesses(&typ.children, path, name, fb, env, global, typ.span);
-            struct_witness(field_witnesses, fb, env, global, span)
+            struct_witness(field_witnesses, fb, span)
         }
         TypeKind::Primitive(prim) => match prim {
             ast::Prim::Int(int_type) => ir::Witness::Static {
@@ -507,13 +522,7 @@ fn lower_witness(typ: &Type, fb: &mut FuncBuilder, env: &Env, global: &Global) -
     }
 }
 
-fn struct_witness(
-    mut fields: Vec<ir::Witness>,
-    fb: &mut FuncBuilder,
-    _env: &Env,
-    _global: &Global,
-    span: Span,
-) -> ir::Witness {
+fn struct_witness(mut fields: Vec<ir::Witness>, fb: &mut FuncBuilder, span: Span) -> ir::Witness {
     let mut total_size = 0;
     let mut max_align = 0;
     fields.retain(|witness| {

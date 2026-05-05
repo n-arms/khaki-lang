@@ -5,6 +5,7 @@ use crate::{
     typing::{Error, sub::Sub},
 };
 
+#[derive(Debug)]
 pub struct CorResult {
     pub generics: Vec<String>,
     pub result: Type,

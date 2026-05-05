@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! An ordered map
 
 use core::fmt;

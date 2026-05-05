@@ -3,87 +3,17 @@ cors are lowered into a struct (called `cor`) with one function: `cor.poll`,
 as well as the original cor function (called the constructor), which just builds a `cor` and returns it
 */
 
-use std::{
-    collections::{HashMap, HashSet},
-    iter,
-};
-
-use chumsky::container::Seq;
+use std::collections::{HashMap, HashSet};
 
 use crate::{
-    ast::{Type, TypeKind, cor_name},
     emit::{
-        block_name, emit_instr, emit_type, load_slot, resolve_func, slot_name, store_slot,
-        str_list,
+        block_name, emit_type, load_slot, slot_name,
         text::{LlvmVals, Text},
     },
     ir::{BlockId, End, Func, Slot, Value},
 };
 
-// calculate all the slots that need to be saved / restored over await points
-// we don't do fine-grained tracking of which slot needs to be saved over which gap
-
-struct CorSlots {
-    saved_slots: Vec<Slot>,
-    temp_slots: Vec<Slot>,
-}
-
-fn saved_slots(func: &Func) -> CorSlots {
-    let mut saved = func.args.clone();
-    let mut all = HashSet::new();
-    for block in func.blocks.values() {
-        let mut defined: HashSet<Slot> = HashSet::new();
-        for instr in &block.instrs {
-            for arg in &instr.args {
-                if !defined.contains(arg) && !saved.contains(arg) {
-                    saved.push(arg.clone());
-                }
-            }
-            defined.insert(instr.result.clone());
-            all.insert(&instr.result);
-
-            if let Value::Ref = instr.value {
-                if !saved.contains(&instr.args[0]) {
-                    saved.push(instr.args[0].clone());
-                }
-            }
-        }
-        all.extend(block.end.result_slots());
-    }
-
-    let mut temp_slots = Vec::new();
-
-    for slot in all {
-        if !saved.contains(slot) {
-            temp_slots.push(slot.clone());
-        }
-    }
-    CorSlots {
-        saved_slots: saved,
-        temp_slots,
-    }
-}
-
-// each basic block which ends in an `End::Yield` or `End::Await` gets a state number
-fn build_block_state_maps(func: &Func) -> HashMap<BlockId, usize> {
-    let mut state_map: HashMap<_, _> = func
-        .blocks
-        .iter()
-        .filter_map(|(current_id, block)| match &block.end {
-            End::Return(..) | End::Jump(..) | End::JumpIf { .. } => None,
-            // yields resume at the next block
-            End::Yield(next_id, _) => Some(*next_id),
-            // awaits resume at the current block
-            End::Await { .. } => Some(*current_id),
-        })
-        .enumerate()
-        .map(|(state, id)| (id, state + 1))
-        .collect();
-    state_map.insert(func.main, 0);
-    state_map
-}
-
-fn cor_struct_name(func: &Func) -> String {
+fn cor_struct_name(_func: &Func) -> String {
     todo!()
     /*
     let result_type = Type::named(
@@ -96,7 +26,7 @@ fn cor_struct_name(func: &Func) -> String {
     */
 }
 
-pub fn emit_cor_struct(func: &Func, text: &mut Text) {
+pub fn emit_cor_struct(_func: &Func, _text: &mut Text) {
     /*
     let slots = saved_slots(func).saved_slots;
     let struct_name = cor_struct_name(struct_spec, func);
@@ -105,7 +35,7 @@ pub fn emit_cor_struct(func: &Func, text: &mut Text) {
     */
 }
 
-pub fn emit_constructor(func: &Func, text: &mut Text) {
+pub fn emit_constructor(_func: &Func, _text: &mut Text) {
     /*
     let struct_name = cor_struct_name(struct_spec, func);
 
@@ -146,6 +76,7 @@ pub fn emit_constructor(func: &Func, text: &mut Text) {
     */
 }
 
+/*
 fn emit_slot_setup(slots: &CorSlots, cor_struct: &str, text: &mut Text) {
     for slot in &slots.temp_slots {
         text.pushln(format!(
@@ -163,8 +94,8 @@ fn emit_slot_setup(slots: &CorSlots, cor_struct: &str, text: &mut Text) {
         ))
     }
 }
-
-pub fn emit_poll(func: &Func, text: &mut Text) {
+*/
+pub fn emit_poll(_func: &Func, _text: &mut Text) {
     /*
     let cor_spec = Spec {
         struct_name: cor_name(&struct_spec.struct_name, &func.name),
@@ -229,14 +160,14 @@ fn emit_cor_end(
     vals: &mut LlvmVals,
 ) {
     match end {
-        End::Jump(block_id, span) => {
+        End::Jump(block_id, _span) => {
             text.pushln(format!("br label %{}", block_name(*block_id)));
         }
         End::JumpIf {
             slot,
             then_branch,
             else_branch,
-            span,
+            span: _,
         } => {
             let cond = load_slot(slot, text, vals);
             let temp = vals.fresh();
@@ -250,10 +181,10 @@ fn emit_cor_end(
             ));
         }
         End::Await {
-            cor_struct,
-            result,
-            then_branch,
-            span,
+            cor_struct: _,
+            result: _,
+            then_branch: _,
+            span: _,
         } => {
             todo!()
             /*
@@ -282,12 +213,12 @@ fn emit_cor_end(
             text.pushln("ret i8 0");
             */
         }
-        End::Yield(block_id, span) => {
+        End::Yield(block_id, _span) => {
             let state = id_to_state[block_id];
             text.pushln(format!("store i32 {state}, i32* {state_ptr}"));
             text.pushln(format!("ret i8 0"));
         }
-        End::Return(slot, span) => {
+        End::Return(slot, _span) => {
             let return_val = load_slot(slot, text, vals);
             let return_type = emit_type(&slot.1);
             text.pushln(format!(
@@ -295,5 +226,11 @@ fn emit_cor_end(
             ));
             text.pushln(format!("ret i8 1"));
         }
+        End::Switch {
+            slot,
+            branches,
+            default,
+            span,
+        } => todo!(),
     }
 }

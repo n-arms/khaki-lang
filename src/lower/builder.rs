@@ -20,12 +20,16 @@ struct BlockBuilder {
 
 impl FuncBuilder {
     pub fn new() -> Self {
+        Self::new_at(0, 0)
+    }
+
+    pub fn new_at(first_id: usize, first_slot: usize) -> Self {
         Self {
-            next_id: 1,
-            next_slot: 0,
+            next_id: first_id + 1,
+            next_slot: first_slot,
             blocks: HashMap::default(),
             current: Some(BlockBuilder {
-                id: BlockId(0),
+                id: BlockId(first_id),
                 instrs: Vec::new(),
             }),
         }

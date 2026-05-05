@@ -2,7 +2,6 @@ use std::collections::{HashMap, HashSet};
 
 use crate::{
     ast::{Arith, Cmp, IntType, Literal, Logic, Prim, Struct, Type, TypeKind},
-    derive::CorParts,
     emit::text::{LlvmVals, Text},
     ir::{BlockId, End, Func, Instr, Module, Op, Slot, Value, Witness},
 };
@@ -31,11 +30,11 @@ fn emit_type(typ: &Type) -> String {
             Prim::Int(int_type) => format!("i{}", int_type.width() * 8),
             Prim::Bool => "i8".into(),
             Prim::Unit => "{}".into(),
-            Prim::Ptr => "ptr".into()
+            Prim::Ptr => "ptr".into(),
         },
         Unif(..) => unreachable!(),
-        Generic(name, id) => unreachable!(),
-        Array(..) => unreachable!()
+        Generic(_name, _id) => unreachable!(),
+        Array(..) => unreachable!(),
     }
 }
 
@@ -88,10 +87,10 @@ fn slot_name(slot: &Slot) -> String {
     format!("%{}", slot.0)
 }
 
-pub fn emit_program(module: &Module, cor_structs: &HashMap<String, CorParts>) -> String {
+pub fn emit_program(module: &Module) -> String {
     let mut text = Text::default();
 
-    for strukt in module.structs.values() {
+    for _strukt in module.structs.values() {
         todo!()
         /*
         if let Some(cor_parts) = cor_structs.get(&spec.struct_name) {
@@ -119,7 +118,7 @@ pub fn emit_program(module: &Module, cor_structs: &HashMap<String, CorParts>) ->
     text.finish()
 }
 
-fn emit_struct_type_def(strukt: &Struct, text: &mut Text) {
+fn emit_struct_type_def(_strukt: &Struct, _text: &mut Text) {
     /*
     text.pushln(format!(
         "{} = type {{ {} }}",
@@ -256,6 +255,12 @@ fn emit_end(end: &End, text: &mut Text, vals: &mut LlvmVals) {
             let return_type = emit_type(&slot.1);
             text.pushln(format!("ret {return_type} {return_val}"));
         }
+        End::Switch {
+            slot,
+            branches,
+            default,
+            span,
+        } => todo!(),
     }
 }
 
@@ -276,7 +281,7 @@ fn emit_instr(instr: &Instr, text: &mut Text, vals: &mut LlvmVals) {
             let temp = load_slot(&instr.args[0], text, vals);
             store_result(temp, text);
         }
-        Value::Func(path, func_name) => {
+        Value::Func(_path, func_name) => {
             let name = resolve_func(func_name);
             store_result(name, text);
         }
@@ -472,8 +477,8 @@ fn emit_instr(instr: &Instr, text: &mut Text, vals: &mut LlvmVals) {
         Value::Ref => {
             store_result(slot_name(&instr.args[0]), text);
         }
-        Value::FieldGet(index, witnesses) => todo!(),
-        Value::FieldRef(index, witnesses) => {
+        Value::FieldGet(_index, _witnesses) => todo!(),
+        Value::FieldRef(index, _witnesses) => {
             let container_ptr = load_slot(&instr.args[0], text, vals);
             let field_ptr = vals.fresh();
             let TypeKind::Primitive(Prim::Ptr) = &instr.args[0].1.kind else {
@@ -485,7 +490,7 @@ fn emit_instr(instr: &Instr, text: &mut Text, vals: &mut LlvmVals) {
                         ));
             store_result(field_ptr, text);
         }
-        Value::PackStruct(path, name) => {
+        Value::PackStruct(_path, _name) => {
             let struct_slot = slot_name(&instr.result);
             for (i, arg) in instr.args.iter().enumerate() {
                 let arg_slot = load_slot(arg, text, vals);
@@ -523,7 +528,7 @@ fn emit_instr(instr: &Instr, text: &mut Text, vals: &mut LlvmVals) {
             ));
             store_result(array_ptr, text);
         }
-        Value::IndexRef(elem_witness) => {
+        Value::IndexRef(_elem_witness) => {
             let array_ptr = load_slot(&instr.args[0], text, vals);
             let index = load_slot(&instr.args[1], text, vals);
             let elem_ptr = vals.fresh();
@@ -536,5 +541,8 @@ fn emit_instr(instr: &Instr, text: &mut Text, vals: &mut LlvmVals) {
             ));
             store_result(elem_ptr, text);
         }
+        Value::Store => todo!(),
+        Value::Load => todo!(),
+        Value::Unreachable => todo!(),
     }
 }

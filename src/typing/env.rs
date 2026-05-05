@@ -10,6 +10,7 @@ use crate::{
     },
 };
 
+#[derive(Debug)]
 pub struct Global {
     sigs: HashMap<Vec<String>, ModuleSig>,
 }

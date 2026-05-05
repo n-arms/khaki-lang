@@ -6,14 +6,9 @@
 use std::collections::HashMap;
 
 use crate::{
-    ast::{Expr, Func, Module, Op, Path, Struct, Type, cor_name},
+    ast::{Expr, Func, Module, Op, Path, Struct, Type},
     ord_map::OrdMap,
 };
-
-#[derive(Debug)]
-pub struct CorParts {
-    pub func_name: String,
-}
 
 // add Foo.Foo function for each struct Foo
 pub fn derive_constructors(module_path: Path, module: &mut Module) {
@@ -54,20 +49,10 @@ pub fn derive_constructors(module_path: Path, module: &mut Module) {
 }
 
 // add the appropriate cor + cor.poll struct + function for each cor, returning the list of generated structs
-pub fn derive_cor_structs(module_path: Path, module: &mut Module) -> HashMap<String, CorParts> {
-    let mut structs = Vec::new();
-    let mut funcs = Vec::new();
-    let mut struct_names = HashMap::new();
-
-    for func in module.funcs.values() {
+pub fn derive_cor_structs(module_path: Path, modules: &mut HashMap<Vec<String>, Module>) {
+    let mut cor_parts = Vec::new();
+    for func in modules[&module_path.path].funcs.values() {
         if func.is_cor {
-            let cor_name = cor_name(&func.name);
-            struct_names.insert(
-                cor_name.clone(),
-                CorParts {
-                    func_name: func.name.clone(),
-                },
-            );
             let span = func.result.span;
             let cor_generic_types: Vec<_> = func
                 .generics
@@ -76,8 +61,8 @@ pub fn derive_cor_structs(module_path: Path, module: &mut Module) -> HashMap<Str
                 .collect();
             let cor_generics = func.generics.clone();
             let cor_type = Type::named(
-                module_path.clone(),
-                cor_name.clone(),
+                module_path.with(func.name.clone(), span),
+                func.name.clone(),
                 cor_generic_types.clone(),
                 span,
             );
@@ -93,17 +78,24 @@ pub fn derive_cor_structs(module_path: Path, module: &mut Module) -> HashMap<Str
                 body: Expr::Op(Op::Builtin("todo".into()), vec![], None, span),
             };
             let cor_struct = Struct {
-                name: cor_name,
+                name: func.name.clone(),
                 generics: cor_generics,
                 fields: OrdMap::new(),
                 span: func.result.span,
             };
-            funcs.push((cor_func.name.clone(), cor_func));
-            structs.push((cor_struct.name.clone(), cor_struct));
+            cor_parts.push((
+                func.name.clone(),
+                Module {
+                    structs: HashMap::from([(func.name.clone(), cor_struct)]),
+                    funcs: HashMap::from([(cor_func.name.clone(), cor_func)]),
+                },
+            ));
         }
     }
 
-    module.structs.extend(structs);
-    module.funcs.extend(funcs);
-    struct_names
+    for (name, module) in cor_parts {
+        let mut path = module_path.path.clone();
+        path.push(name);
+        modules.insert(path, module);
+    }
 }

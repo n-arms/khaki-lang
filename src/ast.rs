@@ -16,7 +16,7 @@ pub struct Span {
     pub file_id: FileId,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Path {
     pub path: Vec<String>,
     pub span: Span,
@@ -30,6 +30,12 @@ impl Path {
         let mut path = self.path.clone();
         path.push(name);
         Self::new(path, span)
+    }
+
+    pub fn popped(&self) -> Path {
+        let mut path = self.path.clone();
+        path.pop();
+        Self::new(path, self.span)
     }
 }
 
@@ -90,10 +96,6 @@ impl Func {
     }
 }
 
-pub fn cor_name(func: &str) -> String {
-    format!("Cor_{func}")
-}
-
 pub fn constructor_name(strukt: &str) -> String {
     strukt.to_owned()
 }
@@ -144,14 +146,24 @@ impl fmt::Debug for Type {
             TypeKind::Any(any) => {
                 write!(f, "any[{any}] {:?}", self.children[0])
             }
-            TypeKind::Named(_, name) => {
-                let mut tuple = f.debug_tuple(&format!("{name:?}"));
+            TypeKind::Named(path, name) => {
+                let mut tuple = f.debug_tuple(&format!("{path:?}{name:?}"));
                 for child in &self.children {
                     tuple.field(child);
                 }
                 tuple.finish()
             }
-            TypeKind::Primitive(prim) => write!(f, "{prim:?}"),
+            TypeKind::Primitive(prim) => {
+                if self.children.is_empty() {
+                    write!(f, "{prim:?}")
+                } else {
+                    let mut tuple = f.debug_tuple(&format!("{prim:?}"));
+                    for child in &self.children {
+                        tuple.field(child);
+                    }
+                    tuple.finish()
+                }
+            }
             TypeKind::Unif(u) => write!(f, "unif{u}"),
             TypeKind::Generic(name, unif) => {
                 if *unif == 0 {
@@ -173,7 +185,7 @@ pub struct IntType {
     signed: bool,
 }
 
-const SIZE_WIDTH: usize = 32;
+const SIZE_WIDTH: usize = 8;
 
 impl IntType {
     pub fn usize() -> Self {
@@ -465,5 +477,14 @@ impl Span {
             end,
             file_id,
         }
+    }
+}
+
+impl fmt::Debug for Path {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for elem in &self.path {
+            write!(f, "{elem}::")?;
+        }
+        Ok(())
     }
 }
