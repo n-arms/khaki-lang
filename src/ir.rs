@@ -78,6 +78,8 @@ pub enum Value {
     IndexRef(Witness),
     // Unreachable branch. Either traps or invokes UB depending on backend.
     Unreachable,
+    // An undefined value. Reading from it is UB.
+    Undefined,
 }
 
 #[derive(Clone, Debug)]
@@ -173,6 +175,7 @@ impl fmt::Debug for Value {
             Value::RefArray => write!(f, "ref_array"),
             Value::IndexRef(w) => write!(f, "index_ref {:?}", w),
             Value::Unreachable => write!(f, "unreachable"),
+            Value::Undefined => write!(f, "undefined"),
         }
     }
 }

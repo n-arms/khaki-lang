@@ -91,6 +91,20 @@ fn lower_expr(expr: &ast::Expr, fb: &mut FuncBuilder, env: &Env, global: &Global
                 let then_branch = fb.create_block();
                 let else_branch = fb.create_block();
                 let finally_branch = fb.create_block();
+                let result_slot = fb.instr(
+                    result.clone(),
+                    result_witness,
+                    ir::Value::Undefined,
+                    vec![],
+                    *span,
+                );
+                let result_ptr = fb.instr(
+                    Type::ptr(result.clone(), *span),
+                    pointer_witness(),
+                    ir::Value::Ref,
+                    vec![result_slot.clone()],
+                    *span,
+                );
                 fb.end_block(ir::End::JumpIf {
                     slot: cond_val,
                     then_branch,
@@ -98,16 +112,24 @@ fn lower_expr(expr: &ast::Expr, fb: &mut FuncBuilder, env: &Env, global: &Global
                     span: *span,
                 });
                 fb.start_block(then_branch);
-                let result_slot = lower_expr(&args[1], fb, env, global);
+                let then_result = lower_expr(&args[1], fb, env, global);
+                let _ = fb.instr(
+                    Type::unit(*span),
+                    unit_witness(),
+                    ir::Value::Store,
+                    vec![result_ptr.clone(), then_result],
+                    *span,
+                );
                 fb.end_block(ir::End::Jump(finally_branch, *span));
                 fb.start_block(else_branch);
-                let temp = lower_expr(&args[2], fb, env, global);
-                fb.push(ir::Instr {
-                    result: result_slot.clone(),
-                    value: ir::Value::Slot,
-                    args: vec![temp],
-                    span: *span,
-                });
+                let else_result = lower_expr(&args[2], fb, env, global);
+                let _ = fb.instr(
+                    Type::unit(*span),
+                    unit_witness(),
+                    ir::Value::Store,
+                    vec![result_ptr.clone(), else_result],
+                    *span,
+                );
                 fb.end_block(ir::End::Jump(finally_branch, *span));
                 fb.start_block(finally_branch);
 
@@ -278,7 +300,7 @@ fn lower_expr(expr: &ast::Expr, fb: &mut FuncBuilder, env: &Env, global: &Global
                         fb.instr(
                             Type::unit(*span),
                             unit_witness(),
-                            ir::Value::Op(ir::Op::Builtin("ptr_set".into())),
+                            ir::Value::Store,
                             vec![lvalue_ptr_slot, val_slot],
                             *span,
                         );

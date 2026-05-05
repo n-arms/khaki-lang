@@ -191,7 +191,7 @@ fn build_coroutine(
                     span,
                 );
                 fb.push(Instr {
-                    result: slot,
+                    result: slot.clone(),
                     value: Value::Slot,
                     args: vec![ptr],
                     span,
@@ -205,11 +205,28 @@ fn build_coroutine(
                     })
                     .collect();
                 fb.push(Instr {
-                    result: slot,
+                    result: slot.clone(),
                     value: instr.value.clone(),
                     args,
                     span,
                 });
+            }
+
+            if let Some(index) = saved_map.get(&slot) {
+                let slot_ptr = fb.instr(
+                    Type::ptr(slot.1.clone(), slot.1.span),
+                    pointer_witness(),
+                    Value::FieldRef(*index, cor_witnesses.clone()),
+                    vec![cor_slot.clone()],
+                    span,
+                );
+                let _ = fb.instr(
+                    Type::unit(span),
+                    unit_witness(),
+                    Value::Store,
+                    vec![slot_ptr, slot],
+                    span,
+                );
             }
         }
         match block.end.clone() {

@@ -544,5 +544,6 @@ fn emit_instr(instr: &Instr, text: &mut Text, vals: &mut LlvmVals) {
         Value::Store => todo!(),
         Value::Load => todo!(),
         Value::Unreachable => todo!(),
+        Value::Undefined => todo!(),
     }
 }
