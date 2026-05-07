@@ -117,6 +117,16 @@ pub enum End {
     Return(Slot, Span),
 }
 
+impl Witness {
+    pub fn is_static(&self) -> bool {
+        if let Witness::Static { .. } = self {
+            true
+        } else {
+            false
+        }
+    }
+}
+
 impl End {
     pub fn result_slots(&self) -> impl IntoIterator<Item = &Slot> {
         match self {

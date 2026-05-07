@@ -1,7 +1,10 @@
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashSet, VecDeque},
+    iter,
+};
 
 use crate::{
-    ast::{Arith, Cmp, IntType, Literal, Logic, Prim, Struct, Type, TypeKind},
+    ast::{Arith, Cmp, IntType, Literal, Logic, Prim, Type, TypeKind},
     emit::text::{LlvmVals, Text},
     ir::{BlockId, End, Func, Instr, Module, Op, Slot, Value, Witness},
 };
@@ -38,47 +41,6 @@ fn emit_type(typ: &Type) -> String {
     }
 }
 
-// fn type_name(typ: &Type) -> String {
-//     if let Some(name) = primitive_type(typ) {
-//         return name;
-//     }
-//     match &typ.kind {
-//         TypeKind::Func => {
-//             let [args @ .., result] = typ.children.as_slice() else {
-//                 unreachable!()
-//             };
-//             format!(
-//                 "{} ({})*",
-//                 emit_type(result),
-//                 str_list(args.iter().map(emit_type))
-//             )
-//         }
-//         TypeKind::Named(name) => {
-//             if name == "Ptr" {
-//                 emit_type(&typ.children[0]) + "*"
-//             } else {
-//                 format!("{name}[{}]", str_list(typ.children.iter().map(type_name)))
-//             }
-//         }
-//         TypeKind::Array(size) => {
-//             format!("[{size} x {}]", emit_type(&typ.children[0]))
-//         }
-//         TypeKind::Generic(_) | TypeKind::Unif(_) => unreachable!(),
-//     }
-// }
-
-// fn struct_name(struct_spec: &Spec) -> String {
-//     format!(
-//         "{}[{}]",
-//         struct_spec.struct_name,
-//         str_list(struct_spec.generics.iter().map(type_name)),
-//     )
-// }
-
-// pub fn resolve_struct(struct_spec: &Spec) -> String {
-//     format!("%\"{}\"", struct_name(struct_spec))
-// }
-
 pub fn resolve_func(func_name: &str) -> String {
     format!("@\"{}\"", func_name)
 }
@@ -87,30 +49,20 @@ fn slot_name(slot: &Slot) -> String {
     format!("%{}", slot.0)
 }
 
-pub fn emit_program(module: &Module) -> String {
+pub fn emit_module(module: &Module) -> String {
     let mut text = Text::default();
 
-    for _strukt in module.structs.values() {
-        todo!()
-        /*
-        if let Some(cor_parts) = cor_structs.get(&spec.struct_name) {
-            //let func = &module.funcs[&cor_parts.func_name];
-            //cor::emit_cor_struct(&cor_spec, func, &mut text);
-        } else {
-            emit_struct_type_def(strukt, &mut text);
-        }
-        */
-    }
-
     for func in module.funcs.values() {
-        if func.is_cor {
-            cor::emit_constructor(func, &mut text);
-            cor::emit_poll(func, &mut text);
+        let name = if func.name == "main" {
+            emit_entry_point(func, &mut text);
+            "_main"
         } else {
-            emit_func(func, &mut text);
-        }
+            &func.name
+        };
+        emit_func(func, name, &mut text);
     }
 
+    text.pushln("declare void @llvm.memcpy.p0.p0.i64(ptr nocapture writeonly, ptr nocapture readonly, i64, i1 immarg)");
     text.pushln("attributes #0 = { noinline }");
     text.pushln("@.str = private unnamed_addr constant [4 x i8] c\"%d\\0A\\00\"");
     text.pushln("declare i32 @printf(i8*, ...)");
@@ -118,35 +70,51 @@ pub fn emit_program(module: &Module) -> String {
     text.finish()
 }
 
-fn emit_struct_type_def(_strukt: &Struct, _text: &mut Text) {
-    /*
-    text.pushln(format!(
-        "{} = type {{ {} }}",
-        &strukt.name,
-        str_list(strukt.fields.values().map(|_| todo!()))
-    ));
-    */
+fn emit_entry_point(func: &Func, text: &mut Text) {
+    text.pushln("define i32 @main() {");
+    text.pushln("entry:");
+    let TypeKind::Primitive(Prim::Int(int)) = &func.result.kind else {
+        panic!("Main doesn't return an int");
+    };
+    let width = int.width();
+    text.inc();
+    text.pushln(format!("%result = alloca [{width} x i8], align {width}"));
+    text.pushln("call void @_main(ptr %result)");
+    text.pushln("%status_code = load i32, ptr %result");
+    text.pushln("ret i32 %status_code");
+    text.dec();
+    text.pushln("}");
 }
 
-// emits a "normal" function (not a cor)
-fn emit_func(func: &Func, text: &mut Text) {
-    emit_func_prefix(func, text);
+fn emit_func(func: &Func, func_name: &str, text: &mut Text) {
+    emit_func_prefix(func, func_name, text);
     let mut vals = LlvmVals::default();
     text.pushln(" {");
     text.pushln("entry:");
     text.inc();
-    emit_slot_setup(func, text);
-    emit_arg_loads(func, text);
+    let mut declared = emit_slot_setup(func, text);
     text.pushln(format!("br label %{}", block_name(func.main)));
     text.dec();
 
-    for (id, block) in &func.blocks {
-        text.pushln(format!("{}:", block_name(*id)));
+    // Perform a BFS on the basic blocks so that dominators are always visited before dominees
+    let mut visited = HashSet::new();
+    let mut to_visit = VecDeque::from([func.main]);
+
+    while let Some(id) = to_visit.pop_back() {
+        if visited.contains(&id) {
+            continue;
+        }
+        visited.insert(id);
+        let block = &func.blocks[&id];
+
+        text.pushln(format!("{}:", block_name(id)));
         text.inc();
         for instr in &block.instrs {
-            emit_instr(instr, text, &mut vals);
+            emit_instr(instr, text, &mut vals, &mut declared);
         }
-        emit_end(&block.end, text, &mut vals);
+        for id in emit_end(&block.end, text, &mut vals, &mut declared) {
+            to_visit.push_front(id);
+        }
         text.dec();
     }
     text.pushln("}");
@@ -179,17 +147,21 @@ fn arg_name(slot: &Slot) -> String {
     format!("%arg_{}", slot.0)
 }
 
-fn emit_func_prefix(func: &Func, text: &mut Text) {
-    let func_name = resolve_func(&func.name);
-    let result_type = emit_type(&func.result);
+fn emit_func_prefix(func: &Func, func_name: &str, text: &mut Text) {
+    let func_name = resolve_func(func_name);
     text.push(format!(
-        "define {result_type} {func_name}({}) #0",
-        str_list(func.args.iter().map(|arg| format!("ptr {}", arg_name(arg))))
+        "define void {func_name}({}) #0",
+        str_list(
+            func.args
+                .iter()
+                .map(|arg| format!("ptr {}", arg_name(arg)))
+                .chain(iter::once("ptr %result".into()))
+        )
     ));
 }
 
 // emit top-level alloca's for each slot, and store the function arguments into the appropriate slots
-pub fn emit_slot_setup(func: &Func, text: &mut Text) {
+pub fn emit_slot_setup(func: &Func, text: &mut Text) -> HashSet<Slot> {
     let slots: HashSet<_> = func
         .blocks
         .values()
@@ -212,24 +184,28 @@ pub fn emit_slot_setup(func: &Func, text: &mut Text) {
         })
         .collect();
 
+    let mut declared = HashSet::new();
+
     for (slot, size, align) in slots {
         text.pushln(format!(
             "{} = alloca [{size} x i8], align {align}",
             slot_name(&slot),
         ));
+        declared.insert(slot);
     }
+    declared
 }
 
-fn emit_arg_loads(func: &Func, text: &mut Text) {
-    for arg in &func.args {
-        store_slot(arg, arg_name(arg), text);
-    }
-}
-
-fn emit_end(end: &End, text: &mut Text, vals: &mut LlvmVals) {
+fn emit_end(
+    end: &End,
+    text: &mut Text,
+    vals: &mut LlvmVals,
+    declared: &mut HashSet<Slot>,
+) -> Vec<BlockId> {
     match end {
         End::Jump(block_id, _) => {
             text.pushln(format!("br label %{}", block_name(*block_id)));
+            vec![*block_id]
         }
         End::JumpIf {
             slot,
@@ -247,13 +223,18 @@ fn emit_end(end: &End, text: &mut Text, vals: &mut LlvmVals) {
             text.pushln(format!(
                 "br i1 {temp}, label %{then_label}, label %{else_label}"
             ));
+            vec![*then_branch, *else_branch]
         }
         End::Await { .. } => unreachable!(),
         End::Yield(..) => unreachable!(),
         End::Return(slot, ..) => {
-            let return_val = load_slot(slot, text, vals);
-            let return_type = emit_type(&slot.1);
-            text.pushln(format!("ret {return_type} {return_val}"));
+            let name = slot_name(slot);
+            let size = witness_size(&slot.2, text, vals);
+            text.pushln(format!(
+                "call void @llvm.memcpy.p0.p0.i64(ptr %result, ptr {name}, i64 {size}, i1 false)"
+            ));
+            text.pushln(format!("ret void"));
+            vec![]
         }
         End::Switch {
             slot,
@@ -261,6 +242,18 @@ fn emit_end(end: &End, text: &mut Text, vals: &mut LlvmVals) {
             default,
             span,
         } => todo!(),
+    }
+}
+
+fn witness_size(witness: &Witness, text: &mut Text, vals: &mut LlvmVals) -> String {
+    match witness {
+        Witness::Static { size, .. } => size.to_string(),
+        Witness::Dynamic(slot) => {
+            let name = slot_name(slot);
+            let size = vals.fresh();
+            text.pushln(format!("{size} = load i64, ptr {name}"));
+            size
+        }
     }
 }
 
@@ -273,7 +266,15 @@ emission strategy:
 /// - instr: The instruction to lower.
 /// - text: The text to push the resulting SSA instructions in to
 /// - vars: A source of SSA variables
-fn emit_instr(instr: &Instr, text: &mut Text, vals: &mut LlvmVals) {
+fn emit_instr(instr: &Instr, text: &mut Text, vals: &mut LlvmVals, declared: &mut HashSet<Slot>) {
+    if !declared.contains(&instr.result) {
+        let Witness::Dynamic(witness) = &instr.result.2 else {
+            unreachable!("Static witnesses should be emitted in prefix");
+        };
+        let size = witness_size(&witness.2, text, vals);
+        let name = slot_name(&instr.result);
+        text.pushln(format!("{name} = alloca i8, i64 {size}"));
+    }
     let result_type = emit_type(&instr.result.1);
     let store_result = |value: String, text: &mut Text| store_slot(&instr.result, value, text);
     match &instr.value {
@@ -295,23 +296,6 @@ fn emit_instr(instr: &Instr, text: &mut Text, vals: &mut LlvmVals) {
         }
         Value::Op(op) => match op {
             Op::Builtin(name) => match name.as_str() {
-                "int_add" => {
-                    let a = load_slot(&instr.args[0], text, vals);
-                    let b = load_slot(&instr.args[1], text, vals);
-                    let temp = vals.fresh();
-                    text.pushln(format!("{temp} = add {result_type} {a}, {b}"));
-                    store_result(temp, text);
-                }
-                "int_less_than" => {
-                    let a = load_slot(&instr.args[0], text, vals);
-                    let b = load_slot(&instr.args[1], text, vals);
-                    let cmp = vals.fresh();
-                    let bool = vals.fresh();
-                    let arg_type = emit_type(&instr.args[0].1);
-                    text.pushln(format!("{cmp} = icmp slt {arg_type} {a}, {b}"));
-                    text.pushln(format!("{bool} = zext i1 {cmp} to i8"));
-                    store_result(bool, text);
-                }
                 "int_print" => {
                     let a = load_slot(&instr.args[0], text, vals);
                     let fmt_ptr = vals.fresh();
@@ -323,25 +307,6 @@ fn emit_instr(instr: &Instr, text: &mut Text, vals: &mut LlvmVals) {
                         "{temp} = call i32 (i8*, ...) @printf(i8* {fmt_ptr}, i32 {a})"
                     ));
                     store_result("{}".into(), text);
-                }
-                "bool_not" => {
-                    let a = load_slot(&instr.args[0], text, vals);
-                    let temp = vals.fresh();
-                    text.pushln(format!("{temp} = xor i8 {a}, 1"));
-                    store_result(temp, text);
-                }
-                "ptr_set" => {
-                    let ptr = load_slot(&instr.args[0], text, vals);
-                    let val = load_slot(&instr.args[1], text, vals);
-                    let val_type = emit_type(&instr.args[1].1);
-                    text.pushln(format!("store {val_type} {val}, {val_type}* {ptr}"));
-                    store_result("{}".into(), text);
-                }
-                "ptr_get" => {
-                    let ptr = load_slot(&instr.args[0], text, vals);
-                    let temp = vals.fresh();
-                    text.pushln(format!("{temp} = load {result_type}, {result_type}* {ptr}"));
-                    store_result(temp, text);
                 }
                 _ => unreachable!("Builtin {name}"),
             },
@@ -457,20 +422,17 @@ fn emit_instr(instr: &Instr, text: &mut Text, vals: &mut LlvmVals) {
         },
         Value::Call => {
             // list of (type, val) pairs
-            let args: Vec<(String, String)> = instr
+            let fp = load_slot(&instr.args[0], text, vals);
+            let args = instr
                 .args
                 .iter()
-                .map(|arg| {
-                    let slot_type = emit_type(&arg.1);
-                    let temp = load_slot(arg, text, vals);
-                    (slot_type, temp)
-                })
-                .collect();
-            let fp = &args[0].1;
+                .skip(1)
+                .map(|arg| format!("ptr {}", slot_name(&arg)))
+                .chain(iter::once(format!("ptr {}", slot_name(&instr.result))));
             let temp = vals.fresh();
             text.pushln(format!(
                 "{temp} = call {result_type} {fp}({})",
-                str_list(args.iter().skip(1).map(|(typ, val)| format!("{typ} {val}")))
+                str_list(args)
             ));
             store_result(temp, text);
         }

@@ -1,3 +1,5 @@
+> [!warning]
+> This is out of date: Khaki has full support for operators, and the design resembles point 2.
 # operators
 As of writing the language doesn't have any operators (+, <, etc), you always specify the operation using function calls that internally reference builtins: `Int.add` is an actual function:
 ```

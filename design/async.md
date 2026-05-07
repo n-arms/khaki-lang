@@ -2,13 +2,13 @@
 We use the same technique as Rust (async state machines), but with less sophistication in terms of safety.
 
 ```
-cor foo(): Int {
+cor foo(): I32 {
   yield;
   5
 }
 
-cor bar(): Int =
-  Int.add(1, foo()!) // automatically awaits foo
+cor bar(): I32 =
+  I32.add(1, foo()!) // automatically awaits foo
 
 fn main(): Unit {
   let bar_cor: @bar = bar(); // use spawn to do a call that isn't automatically awaited
@@ -17,7 +17,7 @@ fn main(): Unit {
 
 Each async function `foo` compiles down to a struct `@foo` which holds the state of the cor invocation, and a function `@foo.poll`.
 ```
-cor foo(): Int {
+cor foo(): I32 {
   yield;
   5
 }
@@ -25,7 +25,7 @@ cor foo(): Int {
 Gets turned into:
 ```
 struct @foo {
-  fn poll(foo: Ptr[@foo], result: Ptr[Int]): Unit;
+  fn poll(foo: Ptr[@foo], result: Ptr[I32]): Unit;
 }
 ```
 
@@ -39,9 +39,9 @@ using **@cor.poll** on a `@cor` directly allow you to run a `cor` until it yield
 # on lvalues
 concern:
 ```
-cor f(): Int = {
+cor f(): I32 = {
   let x = 5;
-  let y = &x;
+  let y = x&;
   yield;
   y*
 }
@@ -72,6 +72,6 @@ then the saved value of y will point to the stack local variable x (saving point
 
 How do we determine if a stack slot never persists over a yield?
 - It clearly persists if it is directly used over a yield (ie `let x = 5; yield; x`)
-- It has the potenial to persist if a reference is taken, stored over a yield, then used (ie `let x = 5; let y = &x; yield; *y`)
+- It has the potenial to persist if a reference is taken, stored over a yield, then used (ie `let x = 5; let y = x&; yield; y*`)
   - The problem is that without full data-flow analysis we can't tell when the reference will be used
   - Therefore assume that all variables that are referenced have the potential to persist

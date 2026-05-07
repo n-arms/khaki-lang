@@ -9,6 +9,7 @@ use crate::{
 
 mod builder;
 pub mod decor;
+pub mod place;
 
 #[derive(Clone, Default)]
 struct Env {

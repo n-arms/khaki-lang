@@ -10,25 +10,15 @@
   - we also can't necessarily calculate the witness for all our dynamic slots in the function prefix, as some of them might depend on intermediate results of the function
   - we need some way to indicate what scope a slot is declared in (particularly for `if` expressions, where this is 100% needed)
 
-## if we are emitting outside a cor
-- all the work is already done, the correct types should be used already
+## named types
+Problem: a lot of types (anything with a generic) can't be defined by a LLVM struct type (hence the decision to keep everything behind an opaque pointer in LLVM IR). Solution: avoid loading values from slots as much as possible.
+1. Value::Slot - can be implemented with a memcpy
+2. Value::Load - requires us to get the pointer in the slot, but since we know its a pointer, we can specify its type
+3. Value::Call - requires that we load the function (which has a known size), but everything else stays in its slot
+4. Value::Op(Op::Arth(Arith::Add)) - load the arguments as integers, add them, and return the result to a slot
 
-## if we are emitting in a cor
-- direct calls should work like normal
-- calls to `poll` should work like normal
-
-### await
-`await state_machine result_val then_branch`
-becomes
-```
-while (state_machine.poll(&result_val) == YIELD) return YIELD;
-goto then_branch;
-```
-
-### yield
-`yield then_branch`
-becomes
-```
-return YIELD;
-goto then_branch;
-```
+This illuminates a pattern: we generally only need to load a type when it is one of a few known core types:
+- ptr
+- int
+- function
+- etc

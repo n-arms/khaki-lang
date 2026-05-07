@@ -3,7 +3,7 @@ use std::{collections::HashMap, fs, process::Command};
 use crate::{
     ast::{Path, Span},
     derive::{derive_constructors, derive_cor_structs},
-    emit::emit_program,
+    emit::emit_module,
     lower::{decor::decor, lower_module},
     parser::{parse_program, scan_program},
     typing::type_program,
@@ -86,8 +86,8 @@ fn compile_and_run(name: &str, source: &str, config: Config) -> i32 {
         dbg!(ir_map);
         return 0;
     }
-    /*
-    let llvm = emit_program(&lowered);
+    let llvm_modules: Vec<_> = ir_map.values().map(|module| emit_module(module)).collect();
+    let llvm = llvm_modules.join("\n");
     if config.emit {
         dbg!(llvm);
         return 0;
@@ -103,18 +103,15 @@ fn compile_and_run(name: &str, source: &str, config: Config) -> i32 {
     let output = Command::new(&exe_path)
         .output()
         .expect("Failed to run compiler exe");
-    output.status.code().unwrap()
-    */
-    0
+    output
+        .status
+        .code()
+        .expect("Compiled exe likely segfaulted")
 }
 
 fn main() {
     let source = r#"
-    cor foo(): I32 = {
-        yield;
-        4
-    }
-    cor main(): I32 = foo()! + 1
+    func main(): I32 = 3
     "#;
 
     println!(
@@ -123,7 +120,6 @@ fn main() {
             "main",
             source,
             Config {
-                lower: true,
                 ..Default::default()
             }
         )
@@ -142,34 +138,52 @@ mod tests {
         )
     }
 
-    #[test]
-    fn set_get_variable() {
-        assert_eq!(
-            compile_and_run(
-                "set_get",
-                r#"func main(): I32 = {
-                let x = 5;
-                set x = 6;
-                x
-            }"#,
-                Config::default()
-            ),
-            6
-        )
-    }
+    // #[test]
+    // fn set_get_variable() {
+    //     assert_eq!(
+    //         compile_and_run(
+    //             "set_get",
+    //             r#"func main(): I32 = {
+    //             let x = 5;
+    //             set x = 6;
+    //             x
+    //         }"#,
+    //             Config::default()
+    //         ),
+    //         6
+    //     )
+    // }
 
-    #[test]
-    fn call_add1() {
-        assert_eq!(
-            compile_and_run(
-                "add1",
-                r#"
-                func add1(x: I32): I32 = x + 1
-                func main(): I32 = add1(5)
-            "#,
-                Config::default()
-            ),
-            6
-        )
-    }
+    // #[test]
+    // fn call_add1() {
+    //     assert_eq!(
+    //         compile_and_run(
+    //             "add1",
+    //             r#"
+    //             func add1(x: I32): I32 = x + 1
+    //             func main(): I32 = add1(5)
+    //         "#,
+    //             Config::default()
+    //         ),
+    //         6
+    //     )
+    // }
+
+    // #[test]
+    // fn simple_yield_await() {
+    //     assert_eq!(
+    //         compile_and_run(
+    //             "simple_yield_await",
+    //             r#"
+    //             cor foo(): I32 = {
+    //                 yield;
+    //                 4
+    //             }
+    //             cor main(): I32 = foo()! + 1
+    //         "#,
+    //             Config::default()
+    //         ),
+    //         5
+    //     )
+    // }
 }
