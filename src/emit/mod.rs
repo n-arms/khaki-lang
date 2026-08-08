@@ -1,12 +1,13 @@
 use std::{
     collections::{HashSet, VecDeque},
+    io::{self, Write},
     iter,
 };
 
 use crate::{
     ast::{Arith, Cmp, IntType, Literal, Logic, Prim, Type, TypeKind},
     emit::text::{LlvmVals, Text},
-    ir::{BlockId, End, Func, Instr, Module, Op, Slot, Value, Witness},
+    ir::{Arg, BlockId, End, Func, Instr, Module, Op, Slot, Value, Witness},
 };
 
 mod cor;
@@ -38,6 +39,7 @@ fn emit_type(typ: &Type) -> String {
         Unif(..) => unreachable!(),
         Generic(_name, _id) => unreachable!(),
         Array(..) => unreachable!(),
+        Cor(..) => unreachable!(),
     }
 }
 
@@ -45,11 +47,31 @@ pub fn resolve_func(func_name: &str) -> String {
     format!("@\"{}\"", func_name)
 }
 
+/// Qualify a function name with its module path. Root-module functions keep
+/// their bare name; nested modules (e.g. cor modules) get "module::name".
+/// Used for both definitions and references so they stay in sync.
+fn func_symbol(path: &[String], name: &str) -> String {
+    if path.is_empty() {
+        name.to_string()
+    } else {
+        format!("{}::{name}", path.join("::"))
+    }
+}
+
 fn slot_name(slot: &Slot) -> String {
     format!("%{}", slot.0)
 }
 
-pub fn emit_module(module: &Module) -> String {
+pub fn emit_prelude() -> String {
+    let mut text = Text::default();
+    text.pushln("declare void @llvm.memcpy.p0.p0.i64(ptr nocapture writeonly, ptr nocapture readonly, i64, i1 immarg)");
+    text.pushln("attributes #0 = { noinline }");
+    text.pushln("@.str = private unnamed_addr constant [4 x i8] c\"%d\\0A\\00\"");
+    text.pushln("declare i32 @printf(i8*, ...)");
+    text.finish()
+}
+
+pub fn emit_module(path: &[String], module: &Module) -> String {
     let mut text = Text::default();
 
     for func in module.funcs.values() {
@@ -59,13 +81,8 @@ pub fn emit_module(module: &Module) -> String {
         } else {
             &func.name
         };
-        emit_func(func, name, &mut text);
+        emit_func(func, &func_symbol(path, name), &mut text);
     }
-
-    text.pushln("declare void @llvm.memcpy.p0.p0.i64(ptr nocapture writeonly, ptr nocapture readonly, i64, i1 immarg)");
-    text.pushln("attributes #0 = { noinline }");
-    text.pushln("@.str = private unnamed_addr constant [4 x i8] c\"%d\\0A\\00\"");
-    text.pushln("declare i32 @printf(i8*, ...)");
 
     text.finish()
 }
@@ -87,6 +104,8 @@ fn emit_entry_point(func: &Func, text: &mut Text) {
 }
 
 fn emit_func(func: &Func, func_name: &str, text: &mut Text) {
+    println!("ON FUNCTION {func_name}");
+    io::stdout().flush().unwrap();
     emit_func_prefix(func, func_name, text);
     let mut vals = LlvmVals::default();
     text.pushln(" {");
@@ -143,7 +162,7 @@ fn store_slot(slot: &Slot, val: impl AsRef<str>, text: &mut Text) {
     ));
 }
 
-fn arg_name(slot: &Slot) -> String {
+fn arg_name(slot: &Arg) -> String {
     format!("%arg_{}", slot.0)
 }
 
@@ -174,7 +193,6 @@ pub fn emit_slot_setup(func: &Func, text: &mut Text) -> HashSet<Slot> {
             block_slots.extend(block.end.result_slots());
             block_slots
         })
-        .chain(&func.args)
         .filter_map(|slot| {
             if let Witness::Static { size, align } = &slot.2 {
                 Some((slot.clone(), size, align))
@@ -193,6 +211,7 @@ pub fn emit_slot_setup(func: &Func, text: &mut Text) -> HashSet<Slot> {
         ));
         declared.insert(slot);
     }
+
     declared
 }
 
@@ -240,8 +259,28 @@ fn emit_end(
             slot,
             branches,
             default,
-            span,
-        } => todo!(),
+            ..
+        } => {
+            let state = load_slot(slot, text, vals);
+            let state_type = emit_type(&slot.1);
+
+            let mut switch = format!(
+                "switch {state_type} {state}, label %{} [",
+                block_name(*default)
+            );
+            for (i, branch) in branches.iter().enumerate() {
+                switch.push_str(&format!(
+                    " {state_type} {i}, label %{}",
+                    block_name(*branch)
+                ));
+            }
+            switch.push_str(" ]");
+            text.pushln(switch);
+
+            let mut succs = branches.clone();
+            succs.push(*default);
+            succs
+        }
     }
 }
 
@@ -254,6 +293,101 @@ fn witness_size(witness: &Witness, text: &mut Text, vals: &mut LlvmVals) -> Stri
             text.pushln(format!("{size} = load i64, ptr {name}"));
             size
         }
+    }
+}
+
+fn witness_align(witness: &Witness, text: &mut Text, vals: &mut LlvmVals) -> String {
+    match witness {
+        Witness::Static { align, .. } => align.to_string(),
+        Witness::Dynamic(slot) => {
+            // Witness struct is packed as { i64 size, i64 align }, so align lives at byte offset 8
+            let name = slot_name(slot);
+            let ptr = vals.fresh();
+            text.pushln(format!("{ptr} = getelementptr i8, ptr {name}, i64 8"));
+            let align = vals.fresh();
+            text.pushln(format!("{align} = load i64, ptr {ptr}"));
+            align
+        }
+    }
+}
+
+/// Given the running byte offset into a container and the size and align of the next field,
+/// return (start, next): where the field begins (offset + padding) and the offset after it.
+/// Padding follows C struct layout: pad = (align - (offset % align)) % align.
+fn next_field(
+    offset: &str,
+    size: &str,
+    align: &str,
+    text: &mut Text,
+    vals: &mut LlvmVals,
+) -> (String, String) {
+    let rem = vals.fresh();
+    text.pushln(format!("{rem} = urem i64 {offset}, {align}"));
+    let sub = vals.fresh();
+    text.pushln(format!("{sub} = sub i64 {align}, {rem}"));
+    let pad = vals.fresh();
+    text.pushln(format!("{pad} = urem i64 {sub}, {align}"));
+    let start = vals.fresh();
+    text.pushln(format!("{start} = add i64 {offset}, {pad}"));
+    let next = vals.fresh();
+    text.pushln(format!("{next} = add i64 {start}, {size}"));
+    (start, next)
+}
+
+/// Byte offset of the index-th field within its container, per the container's field witnesses.
+fn field_start(
+    index: usize,
+    witnesses: &[Witness],
+    text: &mut Text,
+    vals: &mut LlvmVals,
+) -> String {
+    let mut offset = "0".to_string();
+    for (i, witness) in witnesses.iter().enumerate() {
+        let size = witness_size(witness, text, vals);
+        let align = witness_align(witness, text, vals);
+        let (start, next) = next_field(&offset, &size, &align, text, vals);
+        if i == index {
+            return start;
+        }
+        offset = next;
+    }
+    unreachable!(
+        "field index {index} out of bounds for {} fields",
+        witnesses.len()
+    );
+}
+
+/// Pack each arg slot into the container at C-struct-aligned byte offsets, copying each
+/// whole arg slot in with a memcpy. Sizes and aligns are computed up front so that dynamic
+/// witness loads are emitted before the writes they feed.
+fn pack_fields<'a>(
+    container: &str,
+    args: &[Slot],
+    witnesses: impl IntoIterator<Item = &'a Witness>,
+    text: &mut Text,
+    vals: &mut LlvmVals,
+) {
+    let fields: Vec<_> = witnesses
+        .into_iter()
+        .map(|witness| {
+            (
+                witness_size(witness, text, vals),
+                witness_align(witness, text, vals),
+            )
+        })
+        .collect();
+    let mut offset = "0".to_string();
+    for (arg, (size, align)) in args.iter().zip(&fields) {
+        let (start, next) = next_field(&offset, &size, &align, text, vals);
+        let field_ptr = vals.fresh();
+        text.pushln(format!(
+            "{field_ptr} = getelementptr i8, ptr {container}, i64 {start}"
+        ));
+        text.pushln(format!(
+            "call void @llvm.memcpy.p0.p0.i64(ptr {field_ptr}, ptr {}, i64 {size}, i1 false)",
+            slot_name(arg)
+        ));
+        offset = next;
     }
 }
 
@@ -275,15 +409,29 @@ fn emit_instr(instr: &Instr, text: &mut Text, vals: &mut LlvmVals, declared: &mu
         let name = slot_name(&instr.result);
         text.pushln(format!("{name} = alloca i8, i64 {size}"));
     }
-    let result_type = emit_type(&instr.result.1);
+    println!("{instr:?}");
+    std::io::stdout().flush().unwrap();
     let store_result = |value: String, text: &mut Text| store_slot(&instr.result, value, text);
     match &instr.value {
         Value::Slot => {
-            let temp = load_slot(&instr.args[0], text, vals);
-            store_result(temp, text);
+            let src = slot_name(&instr.args[0]);
+            let size = witness_size(&instr.result.2, text, vals);
+            let result_name = slot_name(&instr.result);
+            text.pushln(format!(
+                "call void @llvm.memcpy.p0.p0.i64(ptr {result_name}, ptr {src}, i64 {size}, i1 false)"
+            ));
         }
-        Value::Func(_path, func_name) => {
-            let name = resolve_func(func_name);
+        Value::Arg(arg) => {
+            let arg_name = arg_name(arg);
+            let arg_size = witness_size(&arg.2, text, vals);
+            let result_name = slot_name(&instr.result);
+
+            text.pushln(format!(
+                "call void @llvm.memcpy.p0.p0.i64(ptr {result_name}, ptr {arg_name}, i64 {arg_size}, i1 false)"
+            ));
+        }
+        Value::Func(path, func_name) => {
+            let name = resolve_func(&func_symbol(&path.path, func_name));
             store_result(name, text);
         }
         Value::Literal(literal) => {
@@ -310,6 +458,23 @@ fn emit_instr(instr: &Instr, text: &mut Text, vals: &mut LlvmVals, declared: &mu
                 }
                 _ => unreachable!("Builtin {name}"),
             },
+            Op::Arith(Arith::Max) => {
+                // clang 14 rejects the umax/smax instructions; lower to icmp + select
+                let a = load_slot(&instr.args[0], text, vals);
+                let b = load_slot(&instr.args[1], text, vals);
+                let signed = IntType::from_type(&instr.args[0].1).unwrap().is_signed();
+                let result_type = emit_type(&instr.result.1);
+                let cond = vals.fresh();
+                text.pushln(format!(
+                    "{cond} = icmp {} {result_type} {a}, {b}",
+                    if signed { "sgt" } else { "ugt" }
+                ));
+                let temp = vals.fresh();
+                text.pushln(format!(
+                    "{temp} = select i1 {cond}, {result_type} {a}, {result_type} {b}"
+                ));
+                store_result(temp, text);
+            }
             Op::Arith(arith) => {
                 let args: Vec<_> = instr
                     .args
@@ -328,12 +493,20 @@ fn emit_instr(instr: &Instr, text: &mut Text, vals: &mut LlvmVals, declared: &mu
                             "udiv"
                         }
                     }
+                    Arith::Urem => {
+                        if IntType::from_type(&instr.args[0].1).unwrap().is_signed() {
+                            "srem"
+                        } else {
+                            "urem"
+                        }
+                    }
                     Arith::ShiftLeft => "shl",
                     Arith::ShiftRight => "lshr",
                     Arith::BitAnd => "and",
                     Arith::BitOr => "or",
                     Arith::BitNot => todo!(),
                     Arith::BitXor => "xor",
+                    Arith::Max => unreachable!(),
                 };
 
                 let suffix = if let Some(arg) = args.get(1) {
@@ -342,6 +515,7 @@ fn emit_instr(instr: &Instr, text: &mut Text, vals: &mut LlvmVals, declared: &mu
                     "".into()
                 };
 
+                let result_type = emit_type(&instr.result.1);
                 text.pushln(format!(
                     "{temp} = {op_name} {result_type} {}{suffix}",
                     args[0]
@@ -410,9 +584,11 @@ fn emit_instr(instr: &Instr, text: &mut Text, vals: &mut LlvmVals, declared: &mu
                 let suffix = if let Some(arg) = args.get(1) {
                     format!(", {arg}")
                 } else {
-                    "-1".into() // for bitwise not
+                    // boolean not: Bool is i8 with values 0/1, so flip the low bit
+                    ", 1".into()
                 };
 
+                let result_type = emit_type(&instr.result.1);
                 text.pushln(format!(
                     "{temp} = {op_name} {result_type} {}{suffix}",
                     args[0]
@@ -429,83 +605,98 @@ fn emit_instr(instr: &Instr, text: &mut Text, vals: &mut LlvmVals, declared: &mu
                 .skip(1)
                 .map(|arg| format!("ptr {}", slot_name(&arg)))
                 .chain(iter::once(format!("ptr {}", slot_name(&instr.result))));
-            let temp = vals.fresh();
-            text.pushln(format!(
-                "{temp} = call {result_type} {fp}({})",
-                str_list(args)
-            ));
-            store_result(temp, text);
+            text.pushln(format!("call void {fp}({})", str_list(args)));
         }
         Value::Ref => {
             store_result(slot_name(&instr.args[0]), text);
         }
-        Value::FieldGet(_index, _witnesses) => todo!(),
-        Value::FieldRef(index, _witnesses) => {
-            let container_ptr = load_slot(&instr.args[0], text, vals);
+        Value::FieldGet(index, witnesses) => {
+            // container is by value: its slot holds the struct bytes, so the field lives
+            // at a byte offset inside that slot
+            let container_slot = slot_name(&instr.args[0]);
+            let offset = field_start(*index, witnesses, text, vals);
             let field_ptr = vals.fresh();
-            let TypeKind::Primitive(Prim::Ptr) = &instr.args[0].1.kind else {
-                unreachable!()
-            };
-            let container_type = emit_type(&instr.args[0].1.children[0]);
             text.pushln(format!(
-                            "{field_ptr} = getelementptr {container_type}, {container_type}* {container_ptr}, i32 0, i32 {index}"
-                        ));
+                "{field_ptr} = getelementptr i8, ptr {container_slot}, i64 {offset}"
+            ));
+            let size = witness_size(&instr.result.2, text, vals);
+            let result_name = slot_name(&instr.result);
+            text.pushln(format!(
+                "call void @llvm.memcpy.p0.p0.i64(ptr {result_name}, ptr {field_ptr}, i64 {size}, i1 false)"
+            ));
+        }
+        Value::FieldRef(index, witnesses) => {
+            // container is a slot holding a ptr to the struct, so GEP off the loaded pointer
+            let container_ptr = load_slot(&instr.args[0], text, vals);
+            let offset = field_start(*index, witnesses, text, vals);
+            let field_ptr = vals.fresh();
+            text.pushln(format!(
+                "{field_ptr} = getelementptr i8, ptr {container_ptr}, i64 {offset}"
+            ));
             store_result(field_ptr, text);
         }
         Value::PackStruct(_path, _name) => {
-            let struct_slot = slot_name(&instr.result);
-            for (i, arg) in instr.args.iter().enumerate() {
-                let arg_slot = load_slot(arg, text, vals);
-                let field_ptr = vals.fresh();
-                text.pushln(format!(
-                            "{field_ptr} = getelementptr {result_type}, {result_type}* {struct_slot}, i32 0, i32 {i}"
-                        ));
-                let arg_type = emit_type(&arg.1);
-                text.pushln(format!(
-                    "store {arg_type} {arg_slot}, {arg_type}* {field_ptr}"
-                ));
-            }
+            pack_fields(
+                &slot_name(&instr.result),
+                &instr.args,
+                instr.args.iter().map(|arg| &arg.2),
+                text,
+                vals,
+            );
         }
-        Value::Array(..) => {
-            let array_slot = slot_name(&instr.result);
-            for (i, arg) in instr.args.iter().enumerate() {
-                let arg_slot = load_slot(arg, text, vals);
-                let field_ptr = vals.fresh();
-                text.pushln(format!(
-                            "{field_ptr} = getelementptr {result_type}, {result_type}* {array_slot}, i32 0, i32 {i}"
-                        ));
-                let arg_type = emit_type(&arg.1);
-                text.pushln(format!(
-                    "store {arg_type} {arg_slot}, {arg_type}* {field_ptr}"
-                ));
-            }
+        Value::Array(_count, elem_witness) => {
+            pack_fields(
+                &slot_name(&instr.result),
+                &instr.args,
+                instr.args.iter().map(|_| elem_witness),
+                text,
+                vals,
+            );
         }
         Value::RefArray => {
-            let array_slot = slot_name(&instr.args[0]);
-            let array_ptr = vals.fresh();
-            assert_eq!(instr.result.1.kind, TypeKind::Primitive(Prim::Ptr));
-            let array_type = emit_type(&instr.args[0].1);
-            text.pushln(format!(
-                "{array_ptr} = getelementptr {array_type}, {array_type}* {array_slot}, i32 0, i32 0"
-            ));
-            store_result(array_ptr, text);
+            // the array slot's address is the pointer to its first byte
+            store_result(slot_name(&instr.args[0]), text);
         }
-        Value::IndexRef(_elem_witness) => {
+        Value::IndexRef(elem_witness) => {
             let array_ptr = load_slot(&instr.args[0], text, vals);
             let index = load_slot(&instr.args[1], text, vals);
+            // scale the byte index by the element witness size, then byte-offset GEP
+            let elem_size = witness_size(elem_witness, text, vals);
+            let byte_index = vals.fresh();
+            text.pushln(format!("{byte_index} = mul i64 {index}, {elem_size}"));
             let elem_ptr = vals.fresh();
-            let TypeKind::Primitive(Prim::Ptr) = &instr.args[0].1.kind else {
-                unreachable!()
-            };
-            let elem_type = emit_type(&instr.args[0].1.children[0]);
             text.pushln(format!(
-                "{elem_ptr} = getelementptr {elem_type}, {elem_type}* {array_ptr}, i32 {index}"
+                "{elem_ptr} = getelementptr i8, ptr {array_ptr}, i64 {byte_index}"
             ));
             store_result(elem_ptr, text);
         }
-        Value::Store => todo!(),
-        Value::Load => todo!(),
-        Value::Unreachable => todo!(),
-        Value::Undefined => todo!(),
+        Value::Store => {
+            let ptr = load_slot(&instr.args[0], text, vals);
+            // byte-copy the whole value slot into the destination, sized by its
+            // witness, like every other compound-value operation in this file
+            let size = witness_size(&instr.args[1].2, text, vals);
+            let val = slot_name(&instr.args[1]);
+            text.pushln(format!(
+                "call void @llvm.memcpy.p0.p0.i64(ptr {ptr}, ptr {val}, i64 {size}, i1 false)"
+            ));
+        }
+        Value::Load => {
+            let ptr = load_slot(&instr.args[0], text, vals);
+            let size = witness_size(&instr.result.2, text, vals);
+            let result_name = slot_name(&instr.result);
+            text.pushln(format!(
+                "call void @llvm.memcpy.p0.p0.i64(ptr {result_name}, ptr {ptr}, i64 {size}, i1 false)"
+            ));
+        }
+        Value::Unreachable => {
+            text.pushln("unreachable");
+        }
+        Value::Undefined => {
+            let undef = match &instr.result.1.kind {
+                TypeKind::Primitive(Prim::Unit) => "{}".into(),
+                _ => "undef".into(),
+            };
+            store_result(undef, text);
+        }
     }
 }

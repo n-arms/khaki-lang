@@ -2,10 +2,11 @@
 
 use crate::{
     ast::{IntType, Literal, Path, Span, Struct, Type, TypeKind},
-    ir::{BlockId, End, Func, Instr, Module, Slot, Value, Witness},
+    ir::{Arg, BlockId, End, Func, Instr, Module, Slot, Value, Witness},
     lower::{
-        Env, Global, bool_witness, builder::FuncBuilder, function_witness, integer_witness,
-        lower_witness, pointer_witness, struct_witness, unit_witness,
+        Env, Global, bool_witness, builder::FuncBuilder, function_witness, generic_name,
+        integer_witness, lower_witness, pointer_witness, struct_witness, unit_witness,
+        witness_type, witness_witness,
     },
     ord_map::OrdMap,
 };
@@ -26,22 +27,17 @@ pub fn decor(modules: &mut HashMap<Vec<String>, Module>, global: &Global) {
                 let generics = modules.get(&cor_path.path).unwrap().structs[&func.name]
                     .generics
                     .clone();
-                let (poll, constructor, strukt) = build_coroutine(&path, func, global, &generics);
+                let (constructor, poll, witness, strukt) =
+                    build_coroutine(&path, func, global, &generics);
                 modules
                     .get_mut(&path.path)
                     .unwrap()
                     .funcs
                     .insert(func_name.clone(), constructor);
-                modules
-                    .get_mut(&cor_path.path)
-                    .unwrap()
-                    .funcs
-                    .insert("poll".into(), poll);
-                modules
-                    .get_mut(&cor_path.path)
-                    .unwrap()
-                    .structs
-                    .insert(func_name, strukt);
+                let cor_module = modules.get_mut(&cor_path.path).unwrap();
+                cor_module.funcs.insert("poll".into(), poll);
+                cor_module.funcs.insert("witness".into(), witness);
+                cor_module.structs.insert(func_name, strukt);
             }
         }
     }
@@ -59,13 +55,13 @@ pub fn decor(modules: &mut HashMap<Vec<String>, Module>, global: &Global) {
 ///
 /// # Returns
 ///
-/// Returns a tuple with (constructor, poll, struct) containing the funcs and struct to replace the old cor function with.
+/// Returns a tuple with (constructor, poll, witness, struct) containing the funcs and struct to replace the old cor function with.
 fn build_coroutine(
     cor_path: &Path,
     cor: &Func,
     global: &Global,
     generics: &[String],
-) -> (Func, Func, Struct) {
+) -> (Func, Func, Func, Struct) {
     // Enumerates the slots that need to be saved
     let CorSlots { saved_slots, .. } = saved_slots(cor);
     let (state_map, states) = build_block_state_maps(cor);
@@ -77,27 +73,33 @@ fn build_coroutine(
 
     let start_block = cor.blocks.keys().map(|id| id.0 + 1).max().unwrap_or(0);
     let start_slot = cor
-        .args
-        .iter()
-        .cloned()
-        .chain(cor.blocks.values().flat_map(|block| {
+        .blocks
+        .values()
+        .flat_map(|block| {
             block
                 .instrs
                 .iter()
                 .map(|instr| instr.result.clone())
                 .chain(block.end.result_slots().into_iter().cloned())
-        }))
+        })
         .map(|slot| (&slot.0[5..]).parse::<usize>().unwrap() + 1)
         .max()
         .unwrap_or(0);
     let mut fb = FuncBuilder::new_at(start_block, start_slot);
 
     let mut env = Env::default();
-    for (name, slot) in generics.iter().zip(&cor.args) {
-        env.set_var(name.clone(), slot.clone());
+    let span = cor.result.span;
+    for (name, arg) in generics.iter().zip(&cor.args) {
+        let slot = Slot(arg.0.clone(), arg.1.clone(), arg.2.clone());
+        fb.push(Instr {
+            result: slot.clone(),
+            value: Value::Arg(arg.clone()),
+            args: vec![],
+            span,
+        });
+        env.set_var(generic_name(name, 0), slot.clone());
     }
 
-    let span = cor.result.span;
     let cor_type = Type::named(
         cor_path.clone().with(cor.name.clone(), span),
         cor.name.clone(),
@@ -107,11 +109,14 @@ fn build_coroutine(
             .collect(),
         span,
     );
-    let cor_slot = Slot(
-        "cor".into(),
-        Type::ptr(cor_type.clone(), span),
-        pointer_witness(),
-    );
+    let cor_slot = fb.slot(Type::ptr(cor_type.clone(), span), pointer_witness());
+    let cor_arg = Arg(cor_slot.0.clone(), cor_slot.1.clone(), cor_slot.2.clone());
+    fb.push(Instr {
+        result: cor_slot.clone(),
+        value: Value::Arg(cor_arg.clone()),
+        args: vec![],
+        span,
+    });
 
     let mut fields = OrdMap::new();
     let mut cor_witnesses = Vec::new();
@@ -134,11 +139,18 @@ fn build_coroutine(
         cor_witnesses.push(witness);
         fields.insert(name, typ.clone());
     }
-    let result_slot = Slot(
-        "result".into(),
-        Type::ptr(cor.result.clone(), span),
-        pointer_witness(),
+    let result_slot = fb.slot(Type::ptr(cor.result.clone(), span), pointer_witness());
+    let result_arg = Arg(
+        result_slot.0.clone(),
+        result_slot.1.clone(),
+        result_slot.2.clone(),
     );
+    fb.push(Instr {
+        result: result_slot.clone(),
+        value: Value::Arg(result_arg.clone()),
+        args: vec![],
+        span,
+    });
     let state_type = Type::int(IntType::usize(), span);
     let state_ptr = fb.instr(
         Type::ptr(state_type.clone(), span),
@@ -276,7 +288,7 @@ fn build_coroutine(
                     span,
                 );
                 let next_state = state_map[&id];
-                let TypeKind::Named(path, _) = cor_struct.1.kind.clone() else {
+                let TypeKind::Cor(path, _) = cor_struct.1.kind.clone() else {
                     unreachable!()
                 };
                 let result_ref = decor_slot_ref(
@@ -387,7 +399,7 @@ fn build_coroutine(
     let mut poll = fb.finish(
         "poll".into(),
         false,
-        vec![cor_slot, result_slot],
+        vec![cor_arg, result_arg],
         Type::bool(cor.result.span),
     );
     poll.main = BlockId(start_block);
@@ -401,7 +413,20 @@ fn build_coroutine(
         vec![],
         cor.result.span,
     );
-    let mut cor_struct_args = cor.args.clone();
+    let mut cor_struct_args: Vec<_> = cor
+        .args
+        .iter()
+        .map(|arg| {
+            let slot = Slot(arg.0.clone(), arg.1.clone(), arg.2.clone());
+            fb.push(Instr {
+                result: slot.clone(),
+                value: Value::Arg(arg.clone()),
+                args: vec![],
+                span,
+            });
+            slot
+        })
+        .collect();
     cor_struct_args.insert(0, first_state_slot);
     let constructed = fb.instr(
         cor_type.clone(),
@@ -416,6 +441,35 @@ fn build_coroutine(
     fb.end_block(End::Return(constructed, cor.result.span));
     let constructor = fb.finish(cor.name.clone(), false, cor.args.clone(), cor_type);
 
+    // the cor type's witness function: given the generic witnesses, compute the
+    // cor struct's layout (state + saved slots) exactly like poll does, then
+    // return it as a Witness value.
+    let mut fb = FuncBuilder::new();
+    let mut env = Env::default();
+    let witness_args: Vec<_> = generics
+        .iter()
+        .map(|generic| {
+            let slot = fb.slot(witness_type(span), witness_witness());
+            let arg = Arg(slot.0.clone(), slot.1.clone(), slot.2.clone());
+            env.set_var(generic_name(generic, 0), slot.clone());
+            fb.push(Instr {
+                result: slot.clone(),
+                value: Value::Arg(arg.clone()),
+                args: vec![],
+                span,
+            });
+            arg
+        })
+        .collect();
+    let field_witnesses: Vec<_> = fields
+        .values()
+        .map(|typ| lower_witness(typ, &mut fb, &env, global))
+        .collect();
+    let witness = struct_witness(field_witnesses, &mut fb, span);
+    let result = pack_witness(&mut fb, witness, span);
+    fb.end_block(End::Return(result, span));
+    let witness_builder = fb.finish("witness".into(), false, witness_args, witness_type(span));
+
     let strukt = Struct {
         name: cor.name.clone(),
         generics: generics.to_vec(),
@@ -423,7 +477,40 @@ fn build_coroutine(
         span,
     };
 
-    (constructor, poll, strukt)
+    (constructor, poll, witness_builder, strukt)
+}
+
+/// Turns a witness into a slot holding a runtime `Witness` value: dynamic
+/// witnesses already are one; static ones get materialized as `{size, align}`.
+fn pack_witness(fb: &mut FuncBuilder, witness: Witness, span: Span) -> Slot {
+    match witness {
+        Witness::Dynamic(slot) => *slot,
+        Witness::Static { size, align } => {
+            let usize_type = Type::int(IntType::usize(), span);
+            let usize_witness = integer_witness(&IntType::usize());
+            let size_val = fb.instr(
+                usize_type.clone(),
+                usize_witness.clone(),
+                Value::Literal(Literal::Number(size.to_string(), span)),
+                vec![],
+                span,
+            );
+            let align_val = fb.instr(
+                usize_type,
+                usize_witness,
+                Value::Literal(Literal::Number(align.to_string(), span)),
+                vec![],
+                span,
+            );
+            fb.instr(
+                witness_type(span),
+                witness_witness(),
+                Value::PackStruct(Path::new(vec![], span), "Witness".into()),
+                vec![size_val, align_val],
+                span,
+            )
+        }
+    }
 }
 
 /// Yield a reference to the given slot, either to the slot in the coroutine struct, or the temporary slot itself.
@@ -511,7 +598,7 @@ struct CorSlots {
 }
 
 fn saved_slots(func: &Func) -> CorSlots {
-    let mut saved = func.args.clone();
+    let mut saved = Vec::new();
     let mut all = HashSet::new();
     for block in func.blocks.values() {
         let mut defined: HashSet<Slot> = HashSet::new();

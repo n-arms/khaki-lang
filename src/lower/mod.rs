@@ -44,14 +44,28 @@ fn lower_func(func: &ast::Func, global: &Global) -> ir::Func {
     let span = func.result.span;
     for name in &func.generics {
         let slot = fb.slot(witness_type(span), witness_witness());
-        env.set_var(name.clone(), slot.clone());
-        args.push(slot);
+        let arg = ir::Arg(slot.0.clone(), slot.1.clone(), slot.2.clone());
+        env.set_var(generic_name(name, 0), slot.clone());
+        args.push(arg.clone());
+        fb.push(ir::Instr {
+            result: slot,
+            value: ir::Value::Arg(arg),
+            args: vec![],
+            span,
+        });
     }
     for (name, typ) in &func.args {
         let witness = lower_witness(typ, &mut fb, &env, &global);
         let slot = fb.slot(typ.clone(), witness);
         env.set_var(name.clone(), slot.clone());
-        args.push(slot);
+        let arg = ir::Arg(slot.0.clone(), slot.1.clone(), slot.2.clone());
+        args.push(arg.clone());
+        fb.push(ir::Instr {
+            result: slot,
+            value: ir::Value::Arg(arg),
+            args: vec![],
+            span,
+        })
     }
     let result_slot = lower_expr(&func.body, &mut fb, &env, global);
     fb.end_block(ir::End::Return(result_slot, func.result.span));
@@ -213,13 +227,9 @@ fn lower_expr(expr: &ast::Expr, fb: &mut FuncBuilder, env: &Env, global: &Global
                         *span,
                     )
                 }
-                ast::Op::Deref => fb.instr(
-                    result,
-                    result_witness,
-                    ir::Value::Op(ir::Op::Builtin("ptr_get".into())),
-                    arg_vals,
-                    *span,
-                ),
+                ast::Op::Deref => {
+                    fb.instr(result, result_witness, ir::Value::Load, arg_vals, *span)
+                }
                 ast::Op::SliceIndex => {
                     let ptr_witness =
                         lower_witness(&Type::ptr(result.clone(), *span), fb, env, global);
@@ -243,7 +253,7 @@ fn lower_expr(expr: &ast::Expr, fb: &mut FuncBuilder, env: &Env, global: &Global
                     fb.instr(
                         result,
                         result_witness,
-                        ir::Value::Op(ir::Op::Builtin("ptr_get".into())),
+                        ir::Value::Load,
                         vec![elem_ptr],
                         *span,
                     )
@@ -275,14 +285,20 @@ fn lower_expr(expr: &ast::Expr, fb: &mut FuncBuilder, env: &Env, global: &Global
                 }
             }
         }
-        ast::Expr::Call(func, args, _, span) => {
+        ast::Expr::Call(func, args, meta, span) => {
             let func_val = lower_expr(func, fb, env, global);
-            let arg_vals: Vec<_> = args
+            let (_, generics) = meta.clone().unwrap();
+            let witness_args: Vec<_> = generics
                 .iter()
-                .map(|arg| lower_expr(arg, fb, env, global))
+                .map(|generic| {
+                    let witness = lower_witness(generic, fb, env, global);
+                    materialize_witness(fb, witness, *span)
+                })
                 .collect();
+            let arg_vals = args.iter().map(|arg| lower_expr(arg, fb, env, global));
 
             let mut instr_args = vec![func_val];
+            instr_args.extend(witness_args);
             instr_args.extend(arg_vals);
 
             fb.instr(result, result_witness, ir::Value::Call, instr_args, *span)
@@ -468,6 +484,52 @@ pub fn generic_name(name: &str, id: usize) -> String {
     format!("{name}_{id}")
 }
 
+/// Collect `(generic name, instantiated type)` pairs by walking the callee's
+/// declared result type and the call's concrete result type in parallel.
+fn instantiate_generics(declared: &Type, instantiated: &Type, out: &mut Vec<(String, Type)>) {
+    match &declared.kind {
+        TypeKind::Generic(name, _) => out.push((name.clone(), instantiated.clone())),
+        _ => {
+            for (declared, instantiated) in declared.children.iter().zip(&instantiated.children) {
+                instantiate_generics(declared, instantiated, out);
+            }
+        }
+    }
+}
+
+/// Turn a witness into a slot holding a runtime `Witness` value, so it can be
+/// passed as a witness-table argument.
+fn materialize_witness(fb: &mut FuncBuilder, witness: ir::Witness, span: Span) -> ir::Slot {
+    match witness {
+        ir::Witness::Dynamic(slot) => *slot,
+        ir::Witness::Static { size, align } => {
+            let usize_type = Type::int(IntType::usize(), span);
+            let usize_witness = integer_witness(&IntType::usize());
+            let size_val = fb.instr(
+                usize_type.clone(),
+                usize_witness.clone(),
+                ir::Value::Literal(ast::Literal::Number(size.to_string(), span)),
+                vec![],
+                span,
+            );
+            let align_val = fb.instr(
+                usize_type,
+                usize_witness,
+                ir::Value::Literal(ast::Literal::Number(align.to_string(), span)),
+                vec![],
+                span,
+            );
+            fb.instr(
+                witness_type(span),
+                witness_witness(),
+                ir::Value::PackStruct(Path::new(vec![], span), "Witness".into()),
+                vec![size_val, align_val],
+                span,
+            )
+        }
+    }
+}
+
 fn lower_witness(typ: &Type, fb: &mut FuncBuilder, env: &Env, global: &Global) -> ir::Witness {
     let span = typ.span;
     match &typ.kind {
@@ -489,6 +551,8 @@ fn lower_witness(typ: &Type, fb: &mut FuncBuilder, env: &Env, global: &Global) -
         },
         TypeKind::Unif(_) => unreachable!(),
         TypeKind::Generic(name, id) => {
+            // generic params are witness-table args, keyed by "name_id" so they
+            // don't collide with same-named value args
             ir::Witness::Dynamic(Box::new(env.get_var(&generic_name(name, *id)).clone()))
         }
         TypeKind::Array(count) => {
@@ -542,44 +606,190 @@ fn lower_witness(typ: &Type, fb: &mut FuncBuilder, env: &Env, global: &Global) -
                 }
             }
         }
+        TypeKind::Cor(path, name) => {
+            // the cor type's witness is computed by the generated witness function
+            // path::name(<generic witnesses>)
+            let mut args = Vec::new();
+            for child in &typ.children {
+                match lower_witness(child, fb, env, global) {
+                    ir::Witness::Dynamic(slot) => args.push(*slot),
+                    ir::Witness::Static { size, align } => {
+                        // materialize a concrete witness as a runtime Witness struct
+                        let usize_type = Type::int(IntType::usize(), span);
+                        let usize_witness = integer_witness(&IntType::usize());
+                        let size_val = fb.instr(
+                            usize_type.clone(),
+                            usize_witness.clone(),
+                            ir::Value::Literal(ast::Literal::Number(size.to_string(), span)),
+                            vec![],
+                            span,
+                        );
+                        let align_val = fb.instr(
+                            usize_type,
+                            usize_witness,
+                            ir::Value::Literal(ast::Literal::Number(align.to_string(), span)),
+                            vec![],
+                            span,
+                        );
+                        let witness_slot = fb.instr(
+                            witness_type(span),
+                            witness_witness(),
+                            ir::Value::PackStruct(Path::new(vec![], span), "Witness".into()),
+                            vec![size_val, align_val],
+                            span,
+                        );
+                        args.push(witness_slot);
+                    }
+                }
+            }
+            let func_type = Type::func(
+                vec![],
+                vec![witness_type(span); typ.children.len()],
+                witness_type(span),
+                span,
+            );
+            let func = fb.instr(
+                func_type,
+                function_witness(),
+                ir::Value::Func(path.clone(), name.clone()),
+                vec![],
+                span,
+            );
+            let mut call_args = vec![func];
+            call_args.extend(args);
+            let witness_slot = fb.instr(
+                witness_type(span),
+                witness_witness(),
+                ir::Value::Call,
+                call_args,
+                span,
+            );
+            ir::Witness::Dynamic(Box::new(witness_slot))
+        }
     }
 }
 
-fn struct_witness(mut fields: Vec<ir::Witness>, fb: &mut FuncBuilder, span: Span) -> ir::Witness {
-    let mut total_size = 0;
-    let mut max_align = 0;
-    fields.retain(|witness| {
-        if let ir::Witness::Static { size, align } = witness {
-            total_size += size;
-            max_align = max_align.max(*align);
-            false
-        } else {
-            true
-        }
-    });
+fn struct_witness(fields: Vec<ir::Witness>, fb: &mut FuncBuilder, span: Span) -> ir::Witness {
+    // C struct layout: each field is placed at the next multiple of its own
+    // alignment (padding before it), and the struct's total size is rounded up
+    // to a multiple of the largest field alignment (trailing padding). The size
+    // is therefore order-dependent, so we walk the fields in order.
+    let align_up = |value: usize, align: usize| (value + align - 1) / align * align;
+
+    // Empty struct: no fields, so no padding.
     if fields.is_empty() {
-        ir::Witness::Static {
-            size: total_size,
-            align: max_align,
-        }
-    } else {
-        let usize_witness = integer_witness(&IntType::usize());
-        let _total_size = fb.instr(
-            Type::int(IntType::usize(), span),
-            usize_witness.clone(),
-            ir::Value::Literal(ast::Literal::Number(total_size.to_string(), span)),
-            vec![],
-            span,
-        );
-        let _total_align = fb.instr(
-            Type::int(IntType::usize(), span),
-            usize_witness,
-            ir::Value::Literal(ast::Literal::Number(max_align.to_string(), span)),
-            vec![],
-            span,
-        );
-        todo!();
+        return ir::Witness::Static { size: 0, align: 1 };
     }
+
+    // All fields statically witnessed: compute the layout here, keeping the
+    // static fast path (allocas in the function prefix) that callers rely on.
+    if fields
+        .iter()
+        .all(|field| matches!(field, ir::Witness::Static { .. }))
+    {
+        let mut offset = 0usize;
+        let mut max_align = 1usize;
+        for field in &fields {
+            let ir::Witness::Static { size, align } = field else {
+                unreachable!()
+            };
+            offset = align_up(offset, *align);
+            max_align = max_align.max(*align);
+            offset += *size;
+        }
+        return ir::Witness::Static {
+            size: align_up(offset, max_align),
+            align: max_align,
+        };
+    }
+
+    // Mixed static/dynamic fields: emit the same C layout as runtime arithmetic
+    // over the field witnesses (static ones are just constants for LLVM to
+    // fold), then pack the result into a Witness struct. No witness function is
+    // involved — the whole layout is computed inline, padding included.
+    let mut offset = usize_literal(fb, 0, span);
+    let mut max_align = usize_literal(fb, 1, span);
+    for field in fields {
+        let (size, align) = match field {
+            ir::Witness::Static { size, align } => (
+                usize_literal(fb, size, span),
+                usize_literal(fb, align, span),
+            ),
+            ir::Witness::Dynamic(slot) => {
+                // Witness is { size: i64, align: i64 }: size at field 0, align at field 1.
+                let witnesses = vec![
+                    integer_witness(&IntType::usize()),
+                    integer_witness(&IntType::usize()),
+                ];
+                let size = fb.instr(
+                    Type::int(IntType::usize(), span),
+                    integer_witness(&IntType::usize()),
+                    ir::Value::FieldGet(0, witnesses.clone()),
+                    vec![slot.as_ref().clone()],
+                    span,
+                );
+                let align = fb.instr(
+                    Type::int(IntType::usize(), span),
+                    integer_witness(&IntType::usize()),
+                    ir::Value::FieldGet(1, witnesses),
+                    vec![slot.as_ref().clone()],
+                    span,
+                );
+                (size, align)
+            }
+        };
+        // pad the offset up to this field's alignment before placing it
+        offset = usize_align_up(fb, offset, align.clone(), span);
+        max_align = usize_arith(fb, ast::Arith::Max, max_align, align, span);
+        offset = usize_arith(fb, ast::Arith::Add, offset, size, span);
+    }
+    // trailing padding: the struct's size is a multiple of its max alignment
+    let size = usize_align_up(fb, offset, max_align.clone(), span);
+
+    let witness_slot = fb.instr(
+        witness_type(span),
+        witness_witness(),
+        ir::Value::PackStruct(Path::new(vec![], span), "Witness".into()),
+        vec![size, max_align],
+        span,
+    );
+    ir::Witness::Dynamic(Box::new(witness_slot))
+}
+
+fn usize_literal(fb: &mut FuncBuilder, n: usize, span: Span) -> ir::Slot {
+    fb.instr(
+        Type::int(IntType::usize(), span),
+        integer_witness(&IntType::usize()),
+        ir::Value::Literal(ast::Literal::Number(n.to_string(), span)),
+        vec![],
+        span,
+    )
+}
+
+fn usize_arith(
+    fb: &mut FuncBuilder,
+    op: ast::Arith,
+    a: ir::Slot,
+    b: ir::Slot,
+    span: Span,
+) -> ir::Slot {
+    fb.instr(
+        Type::int(IntType::usize(), span),
+        integer_witness(&IntType::usize()),
+        ir::Value::Op(ir::Op::Arith(op)),
+        vec![a, b],
+        span,
+    )
+}
+
+/// Round `x` up to the next multiple of `align`, the way C padding requires:
+/// `(x + a - 1) - ((x + a - 1) % a)`. LLVM folds this down for constant inputs.
+fn usize_align_up(fb: &mut FuncBuilder, x: ir::Slot, align: ir::Slot, span: Span) -> ir::Slot {
+    let one = usize_literal(fb, 1, span);
+    let a_minus_1 = usize_arith(fb, ast::Arith::Sub, align.clone(), one, span);
+    let t = usize_arith(fb, ast::Arith::Add, x, a_minus_1, span);
+    let r = usize_arith(fb, ast::Arith::Urem, t.clone(), align, span);
+    usize_arith(fb, ast::Arith::Sub, t, r, span)
 }
 
 fn field_witnesses(

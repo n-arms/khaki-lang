@@ -37,7 +37,7 @@ pub fn derive_constructors(module_path: Path, module: &mut Module) {
 
         let func = Func {
             name: strukt.name.clone(),
-            generics: Vec::new(),
+            generics: strukt.generics.clone(),
             args: func_args,
             result,
             is_cor: false,
@@ -60,9 +60,9 @@ pub fn derive_cor_structs(module_path: Path, modules: &mut HashMap<Vec<String>, 
                 .map(|name| Type::generic(name.clone(), span))
                 .collect();
             let cor_generics = func.generics.clone();
-            let cor_type = Type::named(
+            let cor_type = Type::cor(
                 module_path.with(func.name.clone(), span),
-                func.name.clone(),
+                "witness".into(),
                 cor_generic_types.clone(),
                 span,
             );

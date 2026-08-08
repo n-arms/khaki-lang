@@ -10,7 +10,7 @@ use std::collections::HashMap;
 
 use crate::ast::{Arith, Cmp, Literal, Logic, Path, Span, Struct, Type};
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Module {
     pub structs: HashMap<String, Struct>,
     pub funcs: HashMap<String, Func>,
@@ -20,11 +20,14 @@ pub struct Module {
 pub struct Func {
     pub name: String,
     pub is_cor: bool,
-    pub args: Vec<Slot>,
+    pub args: Vec<Arg>,
     pub result: Type,
     pub main: BlockId,
     pub blocks: HashMap<BlockId, Block>,
 }
+
+#[derive(Clone)]
+pub struct Arg(pub String, pub Type, pub Witness);
 
 #[derive(Clone)]
 pub struct Block {
@@ -55,6 +58,7 @@ pub struct Instr {
 #[derive(Clone)]
 pub enum Value {
     Slot,
+    Arg(Arg),
     Func(Path, String),
     Literal(Literal),
     Op(Op),
@@ -152,6 +156,12 @@ impl fmt::Debug for Slot {
     }
 }
 
+impl fmt::Debug for Arg {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0) // Name only for argument positions
+    }
+}
+
 impl Slot {
     fn fmt_full(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}: {:?} {:?}", self.0, self.1, self.2)
@@ -171,6 +181,7 @@ impl fmt::Debug for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Value::Slot => write!(f, "slot"),
+            Value::Arg(Arg(name, ..)) => write!(f, "arg {name}"),
             Value::Func(p, s) => write!(f, "fn {:?}::{}", p, s),
             Value::Literal(l) => write!(f, "{:?}", l),
             Value::Op(o) => write!(f, "{:?}", o),
@@ -243,7 +254,7 @@ impl fmt::Debug for Func {
             if i > 0 {
                 write!(f, ", ")?;
             }
-            arg.fmt_full(f)?;
+            write!(f, "{arg:?}")?;
         }
         writeln!(f, ") -> {:?} {{", self.result)?;
 
@@ -260,5 +271,17 @@ impl fmt::Debug for Func {
             writeln!(f, "{:?}", block.end)?;
         }
         write!(f, "}}")
+    }
+}
+
+impl fmt::Debug for Module {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for strukt in self.structs.values() {
+            writeln!(f, "{strukt:?}")?;
+        }
+        for func in self.funcs.values() {
+            writeln!(f, "{func:?}")?;
+        }
+        Ok(())
     }
 }

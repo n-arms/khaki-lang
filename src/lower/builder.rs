@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::{
     ast::{Span, Type},
-    ir::{Block, BlockId, End, Func, Instr, Slot, Value, Witness},
+    ir::{Arg, Block, BlockId, End, Func, Instr, Slot, Value, Witness},
 };
 
 pub struct FuncBuilder {
@@ -99,7 +99,7 @@ impl FuncBuilder {
         current.instrs.push(instr);
     }
 
-    pub fn finish(mut self, name: String, is_cor: bool, args: Vec<Slot>, result: Type) -> Func {
+    pub fn finish(mut self, name: String, is_cor: bool, args: Vec<Arg>, result: Type) -> Func {
         if let Some(current) = self.current.take() {
             panic!("Premature end to unfinished block {current:?}");
         };

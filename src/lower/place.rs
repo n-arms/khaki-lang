@@ -26,14 +26,6 @@ impl PlaceMap {
 pub fn get_places(func: &Func) -> PlaceMap {
     let mut map = PlaceMap::default();
 
-    for arg in &func.args {
-        if arg.2.is_static() {
-            map.set_slot(arg.clone(), Place::Reg);
-        } else {
-            map.set_slot(arg.clone(), Place::Stack);
-        }
-    }
-
     for block in func.blocks.values() {
         for instr in &block.instrs {
             if instr.result.2.is_static() {

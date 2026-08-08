@@ -75,6 +75,7 @@ impl Sub {
             TypeKind::Unif(unif) => *typ = self.unif(*unif, typ.span),
             TypeKind::Generic(name, id) => *typ = self.generic(name, *id, typ.span),
             TypeKind::Array(_) => {}
+            TypeKind::Cor(..) => {}
         }
     }
 
@@ -85,7 +86,8 @@ impl Sub {
                     self.typ(typ)
                 }
             }
-            Expr::Field(_, _, meta, _) => {
+            Expr::Field(inner, _, meta, _) => {
+                self.expr(inner);
                 if let Some((typ, _)) = meta.as_mut() {
                     self.typ(typ);
                 }
@@ -103,19 +105,26 @@ impl Sub {
                     self.expr(arg);
                 }
             }
-            Expr::Call(func, args, typ, _) => {
+            Expr::Call(func, args, meta, _) => {
                 self.expr(func);
                 for arg in args {
                     self.expr(arg);
                 }
-                if let Some(typ) = typ {
-                    self.typ(typ);
+                if let Some((result, generics)) = meta {
+                    self.typ(result);
+                    for typ in generics {
+                        self.typ(typ);
+                    }
                 }
             }
             Expr::Block(stmts, result, _) => {
                 for stmt in stmts {
                     match stmt {
-                        Stmt::Set(_, val) | Stmt::Expr(val) | Stmt::Let(_, val) => self.expr(val),
+                        Stmt::Set(lval, val) => {
+                            self.expr(lval);
+                            self.expr(val);
+                        }
+                        Stmt::Let(_, val) | Stmt::Expr(val) => self.expr(val),
                     }
                 }
                 if let Some(result) = result {

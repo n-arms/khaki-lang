@@ -30,7 +30,9 @@ pub fn unify(
         (Any(g1), Any(g2)) if g1 == g2 => {}
         (Primitive(prim1), Primitive(prim2)) if prim1 == prim2 => {}
         (Named(path1, name1), Named(path2, name2)) if path1 == path2 && name1 == name2 => {}
+        (Cor(path1, name1), Cor(path2, name2)) if path1 == path2 && name1 == name2 => {}
         (Generic(name1, id1), Generic(name2, id2)) if name1 == name2 && id1 == id2 => {}
+        (Unif(u), Unif(v)) if u == v => {}
         (Unif(u), _) => {
             bind(*u, b.clone(), span, unifs, sub)?;
         }

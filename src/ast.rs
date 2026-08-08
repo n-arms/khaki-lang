@@ -153,6 +153,13 @@ impl fmt::Debug for Type {
                 }
                 tuple.finish()
             }
+            TypeKind::Cor(path, name) => {
+                let mut tuple = f.debug_tuple(&format!("{path:?}<cor {name:?}>"));
+                for child in &self.children {
+                    tuple.field(child);
+                }
+                tuple.finish()
+            }
             TypeKind::Primitive(prim) => {
                 if self.children.is_empty() {
                     write!(f, "{prim:?}")
@@ -244,6 +251,14 @@ impl Type {
         }
     }
 
+    pub fn cor(path: Path, name: String, generics: Vec<Type>, span: Span) -> Self {
+        Self {
+            kind: TypeKind::Cor(path, name),
+            span,
+            children: generics,
+        }
+    }
+
     pub fn generic(name: impl Into<String>, span: Span) -> Self {
         Self::skolem(name, 0, span)
     }
@@ -320,6 +335,8 @@ pub enum TypeKind {
     Func(Vec<String>),
     Any(String),
     Named(Path, String),
+    // Witness table is gotten by calling path::string at runtime with the generics
+    Cor(Path, String),
     Primitive(Prim),
     Unif(usize),
     Generic(String, usize),
@@ -358,12 +375,14 @@ pub enum Arith {
     Sub,
     Mul,
     Div,
+    Urem,
     ShiftLeft,
     ShiftRight,
     BitAnd,
     BitOr,
     BitNot,
     BitXor,
+    Max,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -391,7 +410,7 @@ pub enum Expr {
     Func(Path, String, Option<Type>, Span),
     Literal(Literal, Option<Type>),
     Op(Op, Vec<Expr>, Option<Type>, Span),
-    Call(Box<Expr>, Vec<Expr>, Option<Type>, Span),
+    Call(Box<Expr>, Vec<Expr>, Option<(Type, Vec<Type>)>, Span),
     Block(Vec<Stmt>, Option<Box<Expr>>, Span),
     Field(Box<Expr>, String, Option<(Type, usize)>, Span),
     Array(usize, Option<Vec<Expr>>, Option<Type>, Span),
@@ -417,8 +436,8 @@ impl Expr {
             Expr::Var(_, typ, _)
             | Expr::Literal(_, typ)
             | Expr::Op(_, _, typ, _)
-            | Expr::Func(_, _, typ, _)
-            | Expr::Call(_, _, typ, _) => typ.clone().unwrap(),
+            | Expr::Func(_, _, typ, _) => typ.clone().unwrap(),
+            Expr::Call(_, _, meta, _) => meta.clone().unwrap().0,
             Expr::Field(_, _, meta, _) => meta.clone().unwrap().0,
             Expr::Block(_, expr, span) => {
                 if let Some(expr) = expr {

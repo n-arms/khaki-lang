@@ -53,9 +53,9 @@ pub fn infer_expr(
                         .iter()
                         .map(|generic| Type::generic(generic, *span))
                         .collect();
-                    Type::named(
+                    Type::cor(
                         Path::new(vec![name.clone()], *span),
-                        name.clone(),
+                        "witness".into(),
                         generics,
                         *span,
                     )
@@ -82,7 +82,12 @@ pub fn infer_expr(
                     .iter()
                     .map(|generic| Type::generic(generic, *span))
                     .collect();
-                Type::named(path.clone(), func_name.clone(), generics, *span)
+                Type::cor(
+                    path.clone().with(func_name.clone(), *span),
+                    func_name.clone(),
+                    generics,
+                    *span,
+                )
             } else {
                 func.result.clone()
             };
@@ -108,11 +113,16 @@ pub fn infer_expr(
                     if !local.is_cor() {
                         return Err(Error::AwaitOutsideCor(*span));
                     }
-                    let TypeKind::Named(path, name) = args[0].get_type().kind else {
+                    let TypeKind::Cor(path, _) = args[0].get_type().kind else {
                         let span = *span;
                         return Err(Error::NeedsTypeAnnotation(expr.clone(), span));
                     };
-                    let cor_result = global.get_cor(&path.popped(), &name)?;
+                    // the Cor type's path is the cor's module (named after the
+                    // cor) and its name field is the witness function; the cor
+                    // def itself lives in the parent module, keyed by the cor's
+                    // own name (the last path component)
+                    let cor_name = path.path.last().unwrap();
+                    let cor_result = global.get_cor(&path.popped(), cor_name)?;
                     let mut sub = Sub::default();
                     for (name, typ) in cor_result.generics.iter().zip(args[0].get_type().children) {
                         sub.set_generic(name.clone(), typ.clone());
@@ -179,8 +189,9 @@ pub fn infer_expr(
                     Type::bool(*span)
                 }
                 Op::Logic(_) => {
-                    local.unify(args[0].get_type(), Type::bool(*span), *span)?;
-                    local.unify(args[1].get_type(), Type::bool(*span), *span)?;
+                    for arg in args {
+                        local.unify(arg.get_type(), Type::bool(*span), *span)?;
+                    }
                     Type::bool(*span)
                 }
                 Op::Open(meta) => {
@@ -213,8 +224,11 @@ pub fn infer_expr(
             };
 
             let mut sub = Sub::default();
+            let mut generics = Vec::new();
             for name in generic_names {
-                sub.set_generic(name.clone(), local.fresh(*span));
+                let typ = local.fresh(*span);
+                sub.set_generic(name.clone(), typ.clone());
+                generics.push(typ);
             }
 
             for (mut expected, arg) in func_type.children.iter().cloned().zip(args.iter_mut()) {
@@ -224,7 +238,7 @@ pub fn infer_expr(
             let mut result_type = func_type.children.last().unwrap().clone();
             sub.typ(&mut result_type);
 
-            *meta = Some(result_type);
+            *meta = Some((result_type, generics));
         }
         Expr::Block(stmts, result, span) => {
             let mut inner = scope.clone();

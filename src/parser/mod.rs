@@ -90,6 +90,8 @@ fn program<'a, I: Input<'a, Token = TokenKind, Span = SimpleSpan>>(
 
 const INT_TYPES: LazyCell<HashMap<&'static str, IntType>> = LazyCell::new(|| {
     HashMap::from([
+        ("U64", IntType::unsigned(8)),
+        ("I64", IntType::signed(8)),
         ("I32", IntType::signed(4)),
         ("I16", IntType::signed(2)),
         ("I8", IntType::signed(1)),
@@ -117,6 +119,8 @@ fn module<'a, I: Input<'a, Token = TokenKind, Span = SimpleSpan>>(
                 move |((path, name), children): ((Vec<String>, String), Vec<Type>), e| {
                     if let Some(int_type) = INT_TYPES.get(name.as_str()) {
                         Type::int(*int_type, get_span(e, file_id))
+                    } else if name == "Bool" {
+                        Type::bool(get_span(e, file_id))
                     } else {
                         Type {
                             kind: TypeKind::Named(Path::new(path, get_span(e, file_id)), name),
@@ -348,6 +352,14 @@ fn module<'a, I: Input<'a, Token = TokenKind, Span = SimpleSpan>>(
             base.pratt((
                 prefix(101, just(TokenKind::Open), move |_, inner, e| {
                     Expr::Op(Op::Open(None), vec![inner], None, get_span(e, file_id))
+                }),
+                prefix(94, just(TokenKind::Bang), move |_, inner, e| {
+                    Expr::Op(
+                        Op::Logic(Logic::Not),
+                        vec![inner],
+                        None,
+                        get_span(e, file_id),
+                    )
                 }),
                 postfix(
                     100,
@@ -734,6 +746,25 @@ mod tests {
                 let x = Box(3);
                 let y = box::Box(3);
             }
+        "#;
+        test_parse(source);
+    }
+
+    #[test]
+    fn not() {
+        // prefix `!` is boolean not; postfix `!` is await — both use Bang
+        let source = r#"
+            func main(): Int = {
+                let a = 1;
+                let b = 0;
+                let not_a = !int::equals(a, 0);
+                let not_b = !b;
+                let combined = !int::equals(a, b) ^ True;
+                let postfix_still_awaits = foo()!;
+                not_a + not_b + combined
+            }
+
+            cor foo(): Int = 0
         "#;
         test_parse(source);
     }
