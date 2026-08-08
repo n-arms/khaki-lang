@@ -121,6 +121,8 @@ fn module<'a, I: Input<'a, Token = TokenKind, Span = SimpleSpan>>(
                         Type::int(*int_type, get_span(e, file_id))
                     } else if name == "Bool" {
                         Type::bool(get_span(e, file_id))
+                    } else if name == "Unit" {
+                        Type::unit(get_span(e, file_id))
                     } else {
                         Type {
                             kind: TypeKind::Named(Path::new(path, get_span(e, file_id)), name),

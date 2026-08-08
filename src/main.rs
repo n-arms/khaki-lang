@@ -9,6 +9,36 @@ use crate::{
     typing::type_program,
 };
 
+/// Print `text` with the byte ranges encompassed by `errors` highlighted in
+/// red and the rest in the terminal's default style. Overlapping or adjacent
+/// ranges are merged; ranges are clamped to the text's length.
+fn print_error(text: &str, mut errors: Vec<Span>) {
+    errors.sort_by_key(|span| span.start);
+    // merge overlapping / adjacent spans into disjoint [start, end) ranges
+    let mut segments: Vec<(usize, usize)> = Vec::new();
+    for span in errors {
+        let start = span.start.min(text.len());
+        let end = span.end.min(text.len()).max(start);
+        if let Some(last) = segments.last_mut() {
+            if start <= last.1 {
+                last.1 = last.1.max(end);
+                continue;
+            }
+        }
+        segments.push((start, end));
+    }
+
+    let mut cursor = 0;
+    for (start, end) in segments {
+        if start > cursor {
+            print!("{}", &text[cursor..start]);
+        }
+        print!("\x1b[31m{}\x1b[0m", &text[start..end]);
+        cursor = end;
+    }
+    println!("{}", &text[cursor..]);
+}
+
 mod ast;
 mod derive;
 mod emit;
@@ -43,7 +73,20 @@ impl Default for Config {
 fn compile_and_run(name: &str, source: &str, config: Config) -> i32 {
     let file_id = 0;
     let tokens = scan_program(source).unwrap();
-    let mut module = parse_program(source, &tokens, file_id).unwrap();
+    let parse_result = parse_program(source, &tokens, file_id);
+    if parse_result.has_errors() {
+        print_error(
+            source,
+            parse_result
+                .errors()
+                .map(|e| {
+                    let span = e.span();
+                    Span::new(file_id, span.start, span.end)
+                })
+                .collect(),
+        );
+    }
+    let mut module = parse_result.unwrap();
 
     if config.parse {
         dbg!(module);
@@ -125,7 +168,14 @@ fn compile_and_run(name: &str, source: &str, config: Config) -> i32 {
     derive_constructors(module_path.clone(), &mut module);
     let mut module_map = HashMap::from([(vec![], module)]);
     derive_cor_structs(module_path.clone(), &mut module_map);
-    let global = type_program(&mut module_map).unwrap();
+    let type_result = type_program(&mut module_map);
+    let global = match type_result {
+        Ok(type_result) => type_result,
+        Err(errors) => {
+            print_error(source, errors.iter().map(|e| e.span()).collect());
+            panic!("{errors:#?}");
+        }
+    };
     if config.type_check {
         dbg!(&module_map);
         return 0;
@@ -510,6 +560,40 @@ mod tests {
                 Config::default()
             ),
             10
+        )
+    }
+
+    #[test]
+    fn existential() {
+        assert_eq!(
+            compile_and_run(
+                "existential",
+                r#"
+                struct Task[t] {
+                    state: t*
+                    op: func(t): Unit
+                }
+
+                func run_task(task: any[t] Task[t]): Unit = {
+                    let inner = open task;
+                    (inner.op)(inner.state*)
+                }
+
+                func set_7(x: I32*): Unit = {
+                    set x* = 7;
+                }
+
+                func main(): I32 = {
+                    let s = 0;
+                    let s_p = s&;
+                    let task = Task(s_p&, set_7);
+                    run_task(task);
+                    s
+                }
+                "#,
+                Config::default()
+            ),
+            7
         )
     }
 }

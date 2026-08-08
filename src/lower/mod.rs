@@ -67,12 +67,12 @@ fn lower_func(func: &ast::Func, global: &Global) -> ir::Func {
             span,
         })
     }
-    let result_slot = lower_expr(&func.body, &mut fb, &env, global);
+    let result_slot = lower_expr(&func.body, &mut fb, &mut env, global);
     fb.end_block(ir::End::Return(result_slot, func.result.span));
     fb.finish(func.name.clone(), func.is_cor, args, func.result.clone())
 }
 
-fn lower_expr(expr: &ast::Expr, fb: &mut FuncBuilder, env: &Env, global: &Global) -> ir::Slot {
+fn lower_expr(expr: &ast::Expr, fb: &mut FuncBuilder, env: &mut Env, global: &Global) -> ir::Slot {
     let result = expr.get_type();
     let result_witness = lower_witness(&result, fb, env, global);
     match expr {
@@ -280,8 +280,24 @@ fn lower_expr(expr: &ast::Expr, fb: &mut FuncBuilder, env: &Env, global: &Global
                     arg_vals,
                     *span,
                 ),
-                ast::Op::Open(_) => {
-                    todo!()
+                ast::Op::Open(meta) => {
+                    let (name, id) = meta.clone().unwrap();
+                    let generic = generic_name(&name, id);
+                    let type_slot = fb.instr(
+                        witness_type(*span),
+                        witness_witness(),
+                        ir::Value::FieldGet(1, vec![result_witness.clone(), witness_witness()]),
+                        vec![arg_vals[0].clone()],
+                        *span,
+                    );
+                    env.set_var(generic, type_slot);
+                    fb.instr(
+                        result,
+                        result_witness.clone(),
+                        ir::Value::FieldGet(0, vec![result_witness.clone()]),
+                        vec![arg_vals[0].clone()],
+                        *span,
+                    )
                 }
                 ast::Op::WitnessOf => {
                     let witness = lower_witness(&args[0].get_type(), fb, env, global);
@@ -312,12 +328,12 @@ fn lower_expr(expr: &ast::Expr, fb: &mut FuncBuilder, env: &Env, global: &Global
             for stmt in stmts {
                 match stmt {
                     ast::Stmt::Let(var, _, value) => {
-                        let slot = lower_expr(value, fb, &inner, global);
+                        let slot = lower_expr(value, fb, &mut inner, global);
                         inner.set_var(var.clone(), slot);
                     }
                     ast::Stmt::Set(lval, value) => {
-                        let val_slot = lower_expr(value, fb, &inner, global);
-                        let lvalue_ptr_slot = lower_lvalue_ref(lval, fb, &inner, global);
+                        let val_slot = lower_expr(value, fb, &mut inner, global);
+                        let lvalue_ptr_slot = lower_lvalue_ref(lval, fb, &mut inner, global);
                         fb.instr(
                             Type::unit(*span),
                             unit_witness(),
@@ -327,12 +343,12 @@ fn lower_expr(expr: &ast::Expr, fb: &mut FuncBuilder, env: &Env, global: &Global
                         );
                     }
                     ast::Stmt::Expr(value) => {
-                        lower_expr(value, fb, &inner, global);
+                        lower_expr(value, fb, &mut inner, global);
                     }
                 }
             }
             if let Some(expr) = expr {
-                lower_expr(expr, fb, &inner, global)
+                lower_expr(expr, fb, &mut inner, global)
             } else {
                 fb.instr(
                     result,
@@ -446,7 +462,7 @@ fn lower_expr(expr: &ast::Expr, fb: &mut FuncBuilder, env: &Env, global: &Global
                 result.clone(),
                 result_witness,
                 ir::Value::PackStruct(Path::new(vec![], *span), "Any".into()),
-                vec![t_witness, expr_val],
+                vec![expr_val, t_witness],
                 *span,
             )
         }
@@ -538,7 +554,13 @@ fn lower_witness(typ: &Type, fb: &mut FuncBuilder, env: &Env, global: &Global) -
     let span = typ.span;
     match &typ.kind {
         TypeKind::Func(..) => pointer_witness(),
-        TypeKind::Any(..) => lower_witness(&typ.children[0], fb, env, global),
+        TypeKind::Any(..) => {
+            let fields = vec![
+                lower_witness(&typ.children[0], fb, env, global),
+                witness_witness(),
+            ];
+            struct_witness(fields, fb, span)
+        }
         TypeKind::Named(path, name) => {
             let field_witnesses =
                 field_witnesses(&typ.children, path, name, fb, env, global, typ.span);
@@ -827,7 +849,7 @@ fn field_witnesses(
 fn lower_lvalue_ref(
     expr: &ast::Expr,
     fb: &mut FuncBuilder,
-    env: &Env,
+    env: &mut Env,
     global: &Global,
 ) -> ir::Slot {
     let lvalue_type = expr.get_type();

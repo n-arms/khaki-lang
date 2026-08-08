@@ -32,6 +32,25 @@ pub enum Error {
     BadOpen(Expr, Span),
 }
 
+impl Error {
+    pub fn span(&self) -> Span {
+        match self {
+            Error::UnknownName(_, span)
+            | Error::TypeMismatch(_, _, span)
+            | Error::YieldOutsideCor(span)
+            | Error::AwaitOutsideCor(span)
+            | Error::BadAwait(_, span)
+            | Error::NeedsTypeAnnotation(_, span)
+            | Error::BadLValue(_, span)
+            | Error::BadArraySize(_, span)
+            | Error::BadInt(_, span)
+            | Error::CantUnifyAcrossOpen(_, span)
+            | Error::BadOpen(_, span) => *span,
+            Error::UnknownPath(path) => path.span,
+        }
+    }
+}
+
 pub fn type_program(modules: &mut HashMap<Vec<String>, Module>) -> Result<Global, Vec<Error>> {
     let sigs = modules
         .iter()
@@ -48,7 +67,6 @@ pub fn type_program(modules: &mut HashMap<Vec<String>, Module>) -> Result<Global
                 span: func.result.span,
             };
             if let Err(err) = type_function(&path, func, &env) {
-                panic!("{err:?}");
                 Some(err)
             } else {
                 None

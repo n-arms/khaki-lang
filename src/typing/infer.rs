@@ -196,8 +196,8 @@ pub fn infer_expr(
                     Type::bool(*span)
                 }
                 Op::Open(meta) => {
-                    let mut inner_type = args[0].get_type();
-                    let TypeKind::Any(name) = inner_type.kind.clone() else {
+                    let any_type = args[0].get_type();
+                    let TypeKind::Any(name) = any_type.kind.clone() else {
                         let span = *span;
                         return Err(Error::BadOpen(expr.clone(), span));
                     };
@@ -208,6 +208,8 @@ pub fn infer_expr(
                     let id = *id;
                     let mut sub = Sub::default();
                     sub.set_generic(name.clone(), skolemized);
+
+                    let mut inner_type = any_type.children[0].clone();
                     sub.typ(&mut inner_type);
                     *meta = Some((name, id));
                     inner_type
