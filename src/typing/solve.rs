@@ -51,7 +51,6 @@ fn bind(
     unifs: &mut HashSet<usize>,
     sub: &mut Sub,
 ) -> Result<(), Error> {
-    println!("binding unif {unif} to type {typ:?}");
     unifs.remove(&unif);
     let mut new_sub = Sub::default();
     new_sub.set_unif(unif, typ.clone());

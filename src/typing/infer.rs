@@ -43,7 +43,6 @@ pub fn infer_expr(
     local: &mut Local,
     scope: &Scope,
 ) -> Result<(), Error> {
-    println!("infer {expr:?}");
     match expr {
         Expr::Var(name, typ, span) => {
             if let Ok(func) = global.get_func(&Path::new(vec![], *span), name) {

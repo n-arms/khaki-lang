@@ -508,3 +508,43 @@ impl fmt::Debug for Path {
         Ok(())
     }
 }
+
+impl fmt::Display for Type {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.kind {
+            TypeKind::Func(items) => {
+                let generics = if items.is_empty() {
+                    "".to_owned()
+                } else {
+                    format!("[{}]", items.join(", "))
+                };
+                let result = self.children.last().clone().unwrap();
+                let args: Vec<_> = self
+                    .children
+                    .iter()
+                    .take(self.children.len() - 1)
+                    .map(|c| format!("{c}"))
+                    .collect();
+                write!(f, "func{generics}({}) -> {result}", args.join(", "))
+            }
+            TypeKind::Any(name) => write!(f, "any[{name}] {}", &self.children[0]),
+            TypeKind::Named(path, name) => write!(f, "{path:?}{name}"),
+            TypeKind::Cor(path, name) => write!(f, "{path:?}<cor {name}>"),
+            TypeKind::Primitive(prim) => match prim {
+                Prim::Int(int_type) => {
+                    if int_type.signed {
+                        write!(f, "I{}", int_type.width * 8)
+                    } else {
+                        write!(f, "U{}", int_type.width * 8)
+                    }
+                }
+                Prim::Bool => write!(f, "Bool"),
+                Prim::Unit => write!(f, "Unit"),
+                Prim::Ptr => write!(f, "{}*", self.children[0]),
+            },
+            TypeKind::Unif(unif) => write!(f, "unif{unif}"),
+            TypeKind::Generic(name, _) => write!(f, "{name}"),
+            TypeKind::Array(size) => write!(f, "[{size}]{}{{}}", self.children[0]),
+        }
+    }
+}

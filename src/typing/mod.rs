@@ -1,4 +1,5 @@
-use std::collections::HashMap;
+use core::fmt;
+use std::{collections::HashMap, fmt::Display};
 
 use crate::{
     ast::{Expr, Func, Module, Path, Span, Type},
@@ -57,7 +58,6 @@ pub fn type_program(modules: &mut HashMap<Vec<String>, Module>) -> Result<Global
         .map(|(path, module)| (path.clone(), build_sig(module)))
         .collect();
     let env = Global::new(sigs);
-    dbg!(&env);
     let errors: Vec<_> = modules
         .iter_mut()
         .flat_map(|(path, module)| module.funcs.iter_mut().map(|func| (path.clone(), func)))
@@ -81,7 +81,6 @@ pub fn type_program(modules: &mut HashMap<Vec<String>, Module>) -> Result<Global
 }
 
 fn type_function(path: &Path, func: &mut Func, global: &Global) -> Result<(), Error> {
-    println!("On func {func:?} with path {path:?}");
     let mut local = Local::new(func.is_cor);
     let mut scope = Scope::default();
 
@@ -94,4 +93,27 @@ fn type_function(path: &Path, func: &mut Func, global: &Global) -> Result<(), Er
     let sub = local.solve(func.result.span)?;
     sub.func(func);
     Ok(())
+}
+
+impl Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Error::UnknownName(name, _) => write!(f, "Unknown name {name}"),
+            Error::TypeMismatch(a, b, _) => write!(f, "Expected type {a}, got type {b}"),
+            Error::YieldOutsideCor(_) => write!(f, "Yield outside of a coroutine"),
+            Error::AwaitOutsideCor(_) => write!(f, "Await outside of a coroutine"),
+            Error::BadAwait(typ, _) => write!(f, "Cannot await value of type {typ}"),
+            Error::NeedsTypeAnnotation(..) => {
+                write!(f, "Expression needs a type annotation")
+            }
+            Error::BadLValue(..) => {
+                write!(f, "Expression is not a valid assignment target")
+            }
+            Error::BadArraySize(size, _) => write!(f, "Invalid array size {size}"),
+            Error::BadInt(typ, _) => write!(f, "Bad integer type {typ}"),
+            Error::UnknownPath(path) => write!(f, "Unknown path {path:?}"),
+            Error::CantUnifyAcrossOpen(typ, _) => write!(f, "Cannot unify across open type {typ}"),
+            Error::BadOpen(..) => write!(f, "Cannot open expression"),
+        }
+    }
 }

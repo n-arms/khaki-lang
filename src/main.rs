@@ -4,44 +4,16 @@ use crate::{
     ast::{Expr, Func, IntType, Op, Path, Span, Struct, Type},
     derive::{derive_constructors, derive_cor_structs},
     emit::{emit_module, emit_prelude},
+    errors::print_errors,
     lower::{decor::decor, lower_module},
     parser::{parse_program, scan_program},
     typing::type_program,
 };
 
-/// Print `text` with the byte ranges encompassed by `errors` highlighted in
-/// red and the rest in the terminal's default style. Overlapping or adjacent
-/// ranges are merged; ranges are clamped to the text's length.
-fn print_error(text: &str, mut errors: Vec<Span>) {
-    errors.sort_by_key(|span| span.start);
-    // merge overlapping / adjacent spans into disjoint [start, end) ranges
-    let mut segments: Vec<(usize, usize)> = Vec::new();
-    for span in errors {
-        let start = span.start.min(text.len());
-        let end = span.end.min(text.len()).max(start);
-        if let Some(last) = segments.last_mut() {
-            if start <= last.1 {
-                last.1 = last.1.max(end);
-                continue;
-            }
-        }
-        segments.push((start, end));
-    }
-
-    let mut cursor = 0;
-    for (start, end) in segments {
-        if start > cursor {
-            print!("{}", &text[cursor..start]);
-        }
-        print!("\x1b[31m{}\x1b[0m", &text[start..end]);
-        cursor = end;
-    }
-    println!("{}", &text[cursor..]);
-}
-
 mod ast;
 mod derive;
 mod emit;
+mod errors;
 mod ir;
 mod lower;
 mod ord_map;
@@ -70,27 +42,44 @@ impl Default for Config {
     }
 }
 
-fn compile_and_run(name: &str, source: &str, config: Config) -> i32 {
+fn compile_and_run(name: &str, source: &str, config: Config) -> Option<i32> {
     let file_id = 0;
     let tokens = scan_program(source).unwrap();
     let parse_result = parse_program(source, &tokens, file_id);
     if parse_result.has_errors() {
-        print_error(
+        print_errors(
             source,
             parse_result
                 .errors()
                 .map(|e| {
                     let span = e.span();
-                    Span::new(file_id, span.start, span.end)
+                    let mut error_text = String::from("Found ");
+                    if let Some(found) = e.found() {
+                        error_text += &found.to_string();
+                    } else {
+                        error_text += "EOF"
+                    }
+                    error_text += " expected ";
+                    let expected: Vec<_> = e.expected().map(|e| e.to_string()).collect();
+                    if expected.len() == 0 {
+                        error_text += " nothing.";
+                    } else if expected.len() == 1 {
+                        error_text += &expected[0];
+                    } else {
+                        error_text += "one of ";
+                        error_text += &expected.join(", ");
+                    }
+                    (error_text, Span::new(file_id, span.start, span.end))
                 })
                 .collect(),
         );
+        return None;
     }
     let mut module = parse_result.unwrap();
 
     if config.parse {
         dbg!(module);
-        return 0;
+        return None;
     }
 
     let span = Span::new(file_id, 0, 0);
@@ -172,13 +161,16 @@ fn compile_and_run(name: &str, source: &str, config: Config) -> i32 {
     let global = match type_result {
         Ok(type_result) => type_result,
         Err(errors) => {
-            print_error(source, errors.iter().map(|e| e.span()).collect());
-            panic!("{errors:#?}");
+            print_errors(
+                source,
+                errors.iter().map(|e| (e.to_string(), e.span())).collect(),
+            );
+            return None;
         }
     };
     if config.type_check {
         dbg!(&module_map);
-        return 0;
+        return None;
     }
     let mut ir_map: HashMap<_, _> = module_map
         .iter()
@@ -189,7 +181,7 @@ fn compile_and_run(name: &str, source: &str, config: Config) -> i32 {
     println!("After decor: {:?}", ir_map);
     if config.lower {
         dbg!(ir_map);
-        return 0;
+        return None;
     }
     let llvm_modules: Vec<_> = ir_map
         .iter()
@@ -198,7 +190,7 @@ fn compile_and_run(name: &str, source: &str, config: Config) -> i32 {
     let llvm = llvm_modules.join("\n") + "\n" + &emit_prelude();
     if config.emit {
         dbg!(llvm);
-        return 0;
+        return None;
     }
     let exe_path = format!("./target/{name}");
     let file_path = format!("./target/{name}.ll");
@@ -211,10 +203,12 @@ fn compile_and_run(name: &str, source: &str, config: Config) -> i32 {
     let output = Command::new(&exe_path)
         .output()
         .expect("Failed to run compiler exe");
-    output
-        .status
-        .code()
-        .expect("Compiled exe likely segfaulted")
+    Some(
+        output
+            .status
+            .code()
+            .expect("Compiled exe likely segfaulted"),
+    )
 }
 
 fn main() {
@@ -224,24 +218,27 @@ fn main() {
         b: b
     }
     func first(p: Pair[x, y]): x = p.a
-    func main(): I32 = 3
+    func main(): I32 = True
     "#;
 
-    println!(
-        "Exe result: {}",
-        compile_and_run(
-            "main",
-            source,
-            Config {
-                ..Default::default()
-            }
-        )
-    );
+    if let Some(result) = compile_and_run(
+        "main",
+        source,
+        Config {
+            ..Default::default()
+        },
+    ) {
+        println!("Exe result: {result}");
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn compile_and_run(name: &str, source: &str, config: Config) -> i32 {
+        crate::compile_and_run(name, source, config).unwrap()
+    }
 
     #[test]
     fn int_literal() {

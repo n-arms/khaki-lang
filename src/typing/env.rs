@@ -110,7 +110,6 @@ impl Local {
                 span,
             )?;
         }
-        println!("Produced sub, {:?}", &self.sub);
         for (mut typ, span) in self.ints.drain(0..) {
             self.sub.typ(&mut typ);
             if !matches!(typ.kind, TypeKind::Primitive(Prim::Int(..))) {

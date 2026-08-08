@@ -104,7 +104,6 @@ fn emit_entry_point(func: &Func, text: &mut Text) {
 }
 
 fn emit_func(func: &Func, func_name: &str, text: &mut Text) {
-    println!("ON FUNCTION {func_name}");
     io::stdout().flush().unwrap();
     emit_func_prefix(func, func_name, text);
     let mut vals = LlvmVals::default();
@@ -409,7 +408,6 @@ fn emit_instr(instr: &Instr, text: &mut Text, vals: &mut LlvmVals, declared: &mu
         let name = slot_name(&instr.result);
         text.pushln(format!("{name} = alloca i8, i64 {size}"));
     }
-    println!("{instr:?}");
     std::io::stdout().flush().unwrap();
     let store_result = |value: String, text: &mut Text| store_slot(&instr.result, value, text);
     match &instr.value {

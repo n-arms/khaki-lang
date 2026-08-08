@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+annotate-snippets = "0.12.16"
 chumsky = {version = "0.12.0", features = [ "pratt" ] }
 codespan-reporting = "0.13.1"
 logos = "0.16.1"
