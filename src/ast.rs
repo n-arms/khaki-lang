@@ -364,6 +364,7 @@ pub enum Op {
     If,
     While,
     Constructor(String),
+    WitnessOf,
     // (Slice[t], Int) -> t
     SliceIndex,
     Open(Option<(String, usize)>),
@@ -425,7 +426,7 @@ pub struct AnyMeta {
 
 #[derive(Clone, Debug)]
 pub enum Stmt {
-    Let(String, Expr),
+    Let(String, Option<Type>, Expr),
     Set(Expr, Expr),
     Expr(Expr),
 }

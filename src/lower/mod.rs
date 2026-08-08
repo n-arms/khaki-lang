@@ -283,6 +283,10 @@ fn lower_expr(expr: &ast::Expr, fb: &mut FuncBuilder, env: &Env, global: &Global
                 ast::Op::Open(_) => {
                     todo!()
                 }
+                ast::Op::WitnessOf => {
+                    let witness = lower_witness(&args[0].get_type(), fb, env, global);
+                    materialize_witness(fb, witness, *span)
+                }
             }
         }
         ast::Expr::Call(func, args, meta, span) => {
@@ -307,7 +311,7 @@ fn lower_expr(expr: &ast::Expr, fb: &mut FuncBuilder, env: &Env, global: &Global
             let mut inner = env.clone();
             for stmt in stmts {
                 match stmt {
-                    ast::Stmt::Let(var, value) => {
+                    ast::Stmt::Let(var, _, value) => {
                         let slot = lower_expr(value, fb, &inner, global);
                         inner.set_var(var.clone(), slot);
                     }

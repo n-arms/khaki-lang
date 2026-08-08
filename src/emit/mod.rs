@@ -456,6 +456,15 @@ fn emit_instr(instr: &Instr, text: &mut Text, vals: &mut LlvmVals, declared: &mu
                     ));
                     store_result("{}".into(), text);
                 }
+                "transmute" => {
+                    // transmute: byte-copy the source slot into the result slot
+                    let source = slot_name(&instr.args[0]);
+                    let result_name = slot_name(&instr.result);
+                    let size = witness_size(&instr.args[0].2, text, vals);
+                    text.pushln(format!(
+                        "call void @llvm.memcpy.p0.p0.i64(ptr {result_name}, ptr {source}, i64 {size}, i1 false)"
+                    ));
+                }
                 _ => unreachable!("Builtin {name}"),
             },
             Op::Arith(Arith::Max) => {

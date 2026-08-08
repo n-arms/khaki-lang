@@ -1,7 +1,7 @@
 use std::{collections::HashMap, fs, process::Command};
 
 use crate::{
-    ast::{IntType, Path, Span, Struct, Type},
+    ast::{Expr, Func, IntType, Op, Path, Span, Struct, Type},
     derive::{derive_constructors, derive_cor_structs},
     emit::{emit_module, emit_prelude},
     lower::{decor::decor, lower_module},
@@ -64,6 +64,60 @@ fn compile_and_run(name: &str, source: &str, config: Config) -> i32 {
             ]
             .into_iter()
             .collect(),
+        },
+    );
+
+    module.structs.insert(
+        "Witness".into(),
+        Struct {
+            name: "Witness".into(),
+            span,
+            generics: vec![],
+            fields: [
+                ("size".into(), Type::int(IntType::usize(), span)),
+                ("align".into(), Type::int(IntType::usize(), span)),
+            ]
+            .into_iter()
+            .collect(),
+        },
+    );
+
+    module.funcs.insert(
+        "ptr_cast".into(),
+        Func {
+            name: "ptr_cast".into(),
+            generics: vec!["t".into(), "u".into()],
+            args: vec![("x".into(), Type::ptr(Type::generic("t", span), span))],
+            result: Type::ptr(Type::generic("u", span), span),
+            is_cor: false,
+            body: Expr::Op(
+                Op::Builtin("transmute".into()),
+                vec![Expr::Var("x".into(), None, span)],
+                None,
+                span,
+            ),
+        },
+    );
+
+    module.funcs.insert(
+        "size_of".into(),
+        Func {
+            name: "size_of".into(),
+            generics: vec!["t".into()],
+            args: vec![("x".into(), Type::generic("t", span))],
+            result: Type::int(IntType::usize(), span),
+            is_cor: false,
+            body: Expr::Field(
+                Box::new(Expr::Op(
+                    Op::WitnessOf,
+                    vec![Expr::Var("x".into(), None, span)],
+                    None,
+                    span,
+                )),
+                "size".into(),
+                None,
+                span,
+            ),
         },
     );
 
@@ -360,6 +414,42 @@ mod tests {
                 Config::default()
             ),
             1
+        )
+    }
+
+    #[test]
+    fn transmute() {
+        assert_eq!(
+            compile_and_run(
+                "transmute",
+                r#"
+                func main(): I8 = {
+                    let x: U64 = 16909060;
+                    let slice = Slice(ptr_cast(x&), 4);
+                    slice[1]
+                }
+                "#,
+                Config::default()
+            ),
+            3
+        )
+    }
+
+    #[test]
+    fn dynamic_rtti() {
+        assert_eq!(
+            compile_and_run(
+                "dynamic_rtti",
+                r#"
+                struct Box[t] { inner: t }
+                func main(): U64 = {
+                    let b = Box(5);
+                    size_of(b)
+                }
+                "#,
+                Config::default()
+            ),
+            8
         )
     }
 }

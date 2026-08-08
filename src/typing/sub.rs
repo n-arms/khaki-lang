@@ -124,7 +124,13 @@ impl Sub {
                             self.expr(lval);
                             self.expr(val);
                         }
-                        Stmt::Let(_, val) | Stmt::Expr(val) => self.expr(val),
+                        Stmt::Let(_, annot, val) => {
+                            if let Some(typ) = annot {
+                                self.typ(typ)
+                            }
+                            self.expr(val)
+                        }
+                        Stmt::Expr(val) => self.expr(val),
                     }
                 }
                 if let Some(result) = result {

@@ -250,9 +250,10 @@ fn module<'a, I: Input<'a, Token = TokenKind, Span = SimpleSpan>>(
 
             let let_stmt = just(TokenKind::Let)
                 .ignore_then(name(input))
+                .then(just(TokenKind::Colon).ignore_then(typ.clone()).or_not())
                 .then_ignore(just(TokenKind::Equals))
                 .then(expr.clone())
-                .map(|(var, val)| Stmt::Let(var, val));
+                .map(|((var, annot), val)| Stmt::Let(var, annot, val));
             let set_stmt = just(TokenKind::Set)
                 .ignore_then(expr.clone())
                 .then_ignore(just(TokenKind::Equals))

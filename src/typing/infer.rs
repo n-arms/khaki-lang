@@ -211,6 +211,12 @@ pub fn infer_expr(
                     *meta = Some((name, id));
                     inner_type
                 }
+                Op::WitnessOf => Type::named(
+                    Path::new(Vec::new(), *span),
+                    "Witness".into(),
+                    Vec::new(),
+                    *span,
+                ),
             });
         }
         Expr::Call(func, args, meta, span) => {
@@ -244,8 +250,13 @@ pub fn infer_expr(
             let mut inner = scope.clone();
             for stmt in stmts {
                 match stmt {
-                    Stmt::Let(var, expr) => {
-                        infer_expr(expr, global, local, &inner)?;
+                    Stmt::Let(var, annot, expr) => {
+                        if let Some(typ) = annot {
+                            check_expr(expr, typ, global, local, &inner)?;
+                        } else {
+                            infer_expr(expr, global, local, &inner)?;
+                        }
+                        *annot = Some(expr.get_type());
                         inner.set_var(var.clone(), expr.get_type());
                     }
                     Stmt::Set(lval, expr) => {
