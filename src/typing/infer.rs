@@ -142,7 +142,8 @@ pub fn infer_expr(
                     Type::ptr(args[0].get_type(), *span)
                 }
                 Op::Deref => {
-                    let arg_type = args[0].get_type();
+                    let mut arg_type = args[0].get_type();
+                    local.apply_type(&mut arg_type);
                     let TypeKind::Primitive(Prim::Ptr) = &arg_type.kind else {
                         let span = *span;
                         return Err(Error::NeedsTypeAnnotation(expr.clone(), span));

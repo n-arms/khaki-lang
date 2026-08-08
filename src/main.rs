@@ -452,4 +452,64 @@ mod tests {
             8
         )
     }
+
+    #[test]
+    fn ptr_alias() {
+        assert_eq!(
+            compile_and_run(
+                "ptr_alias",
+                r#"
+                func main(): I32 = {
+                    let elems = []I32 { 2, 3, 4, 5 };
+                    let snd_ptr = elems[1]&;
+                    set snd_ptr* = 7;
+                    elems[1]
+                }
+                "#,
+                Config::default()
+            ),
+            7
+        )
+    }
+
+    #[test]
+    fn arena() {
+        assert_eq!(
+            compile_and_run(
+                "arena",
+                r#"
+                struct Pair[a, b] {
+                    left: a
+                    right: b
+                }
+
+                struct Arena {
+                    bytes: []I8
+                    used: U64
+                }
+
+                func alloc[t](a: Arena*, value: t): t* = {
+                    let value_bytes: Slice[I8] = Slice(ptr_cast(value&), size_of(value));
+                    let remaining_arena = Slice(a*.bytes[a*.used]&, a*.bytes.length-a*.used);
+                    let i = 0;
+                    while i < size_of(value) {
+                        set remaining_arena[i] = value_bytes[i];
+                        set i = i + 1;
+                    };
+                    set a*.used = a*.used + size_of(value);
+                    ptr_cast(remaining_arena[0]&)
+                }
+
+                func main(): I32 = {
+                    let p: Pair[I32, I8] = Pair(3, 4);
+                    let a = Arena([32] {}, 0);
+                    let ptrs = Pair(alloc(a&, p), alloc(a&, 7));
+                    ptrs.left*.left + ptrs.right*
+                }
+                "#,
+                Config::default()
+            ),
+            10
+        )
+    }
 }
